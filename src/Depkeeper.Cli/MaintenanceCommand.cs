@@ -35,9 +35,9 @@ internal static class MaintenanceCommand
         {
             Description = "Repository receiving the report issue (default: GITHUB_REPOSITORY in Actions)."
         };
-        foreach (var option in (Option[])[config, repositories, model, dryRun, retry, repairs, attempts,
-            repairMinutes, ciMinutes, pr, state, report, reportRepository, releaseAge, unknownAge, securityAge])
-            command.Options.Add(option);
+        Option[] options = [config, repositories, model, dryRun, retry, repairs, attempts,
+            repairMinutes, ciMinutes, pr, state, report, reportRepository, releaseAge, unknownAge, securityAge];
+        foreach (var option in options) command.Options.Add(option);
         command.SetAction(async (result, cancellationToken) =>
         {
             try

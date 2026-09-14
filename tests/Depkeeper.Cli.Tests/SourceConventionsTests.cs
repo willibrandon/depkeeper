@@ -16,7 +16,8 @@ public sealed class SourceConventionsTests
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "Depkeeper.slnx"))) root = root.Parent;
         Assert.IsNotNull(root);
         var violations = new List<string>();
-        foreach (var folder in (string[])["src", "tests", "scripts"])
+        string[] folders = ["src", "tests", "scripts"];
+        foreach (var folder in folders)
         {
             foreach (var file in Directory.EnumerateFiles(Path.Combine(root.FullName, folder), "*.cs", SearchOption.AllDirectories))
             {
