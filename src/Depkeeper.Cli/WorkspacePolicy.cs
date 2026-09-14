@@ -121,13 +121,11 @@ internal sealed class WorkspacePolicy
         if (separator <= 0 || !NpmLockResolver.IsExact(key[(separator + 1)..])) return null;
         var name = key[..separator];
         string[] fields = ["dependencies", "devDependencies", "optionalDependencies"];
-        foreach (var field in fields)
+        foreach (var field in fields.Where(field => before.TryGetProperty(field, out var oldDependencies) &&
+            oldDependencies.ValueKind == JsonValueKind.Object && oldDependencies.TryGetProperty(name, out var oldVersion) &&
+            oldVersion.ValueKind == JsonValueKind.String && oldVersion.GetString() == key[(separator + 1)..]))
         {
-            if (!before.TryGetProperty(field, out var oldDependencies) ||
-                oldDependencies.ValueKind != JsonValueKind.Object ||
-                !oldDependencies.TryGetProperty(name, out var oldVersion) || oldVersion.ValueKind != JsonValueKind.String ||
-                oldVersion.GetString() != key[(separator + 1)..] ||
-                !after.TryGetProperty(field, out var newDependencies) ||
+            if (!after.TryGetProperty(field, out var newDependencies) ||
                 newDependencies.ValueKind != JsonValueKind.Object ||
                 !newDependencies.TryGetProperty(name, out var newVersion) || newVersion.ValueKind != JsonValueKind.String ||
                 !NpmLockResolver.IsExact(newVersion.GetString()!)) continue;
