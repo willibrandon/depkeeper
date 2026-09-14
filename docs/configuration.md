@@ -19,6 +19,8 @@ defaults; Actions variables override the file's repository/model defaults.
 
 Profiles can supply `image`, `install`, `verify`, `requiredChecks`, `advisoryChecks`,
 and `releaseAge`. Explicit image and command overrides take precedence over detection.
+Commands use the image's POSIX shell and PATH. Exact Node engine versions and npm
+`packageManager` declarations are honored; other version ranges use the default image.
 
 | Detected manifests | Default validation |
 | --- | --- |
