@@ -87,12 +87,52 @@ internal sealed class WorkspacePolicy
         string[] dependencyFields =
             ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides", "resolutions"];
         foreach (var property in left.RootElement.EnumerateObject()
-            .Where(property => !dependencyFields.Contains(property.Name, StringComparer.Ordinal)))
+            .Where(property => property.Name != "allowScripts" &&
+                !dependencyFields.Contains(property.Name, StringComparer.Ordinal)))
         {
             if (!right.RootElement.TryGetProperty(property.Name, out var value) || !JsonElement.DeepEquals(property.Value, value))
                 return false;
         }
         return right.RootElement.EnumerateObject().All(property => dependencyFields.Contains(property.Name, StringComparer.Ordinal) ||
-            left.RootElement.TryGetProperty(property.Name, out _));
+            left.RootElement.TryGetProperty(property.Name, out _)) && PreservesAllowedScripts(left.RootElement, right.RootElement);
+    }
+
+    private static bool PreservesAllowedScripts(JsonElement before, JsonElement after)
+    {
+        var hadBefore = before.TryGetProperty("allowScripts", out var oldScripts);
+        var hasAfter = after.TryGetProperty("allowScripts", out var newScripts);
+        if (hadBefore != hasAfter) return false;
+        if (!hadBefore) return true;
+        if (oldScripts.ValueKind != JsonValueKind.Object || newScripts.ValueKind != JsonValueKind.Object) return false;
+        var expected = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var script in oldScripts.EnumerateObject())
+        {
+            var key = UpdatedPermissionKey(before, after, script.Name) ?? script.Name;
+            if (!expected.TryAdd(key, script.Value)) return false;
+        }
+        var actual = newScripts.EnumerateObject().ToArray();
+        return actual.Length == expected.Count && actual.All(script =>
+            expected.TryGetValue(script.Name, out var value) && JsonElement.DeepEquals(script.Value, value));
+    }
+
+    private static string? UpdatedPermissionKey(JsonElement before, JsonElement after, string key)
+    {
+        var separator = key.LastIndexOf('@');
+        if (separator <= 0 || !NpmLockResolver.IsExact(key[(separator + 1)..])) return null;
+        var name = key[..separator];
+        string[] fields = ["dependencies", "devDependencies", "optionalDependencies"];
+        foreach (var field in fields)
+        {
+            if (!before.TryGetProperty(field, out var oldDependencies) ||
+                oldDependencies.ValueKind != JsonValueKind.Object ||
+                !oldDependencies.TryGetProperty(name, out var oldVersion) || oldVersion.ValueKind != JsonValueKind.String ||
+                oldVersion.GetString() != key[(separator + 1)..] ||
+                !after.TryGetProperty(field, out var newDependencies) ||
+                newDependencies.ValueKind != JsonValueKind.Object ||
+                !newDependencies.TryGetProperty(name, out var newVersion) || newVersion.ValueKind != JsonValueKind.String ||
+                !NpmLockResolver.IsExact(newVersion.GetString()!)) continue;
+            return name + "@" + newVersion.GetString();
+        }
+        return null;
     }
 }
