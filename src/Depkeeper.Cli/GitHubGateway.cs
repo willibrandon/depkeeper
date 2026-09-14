@@ -102,15 +102,83 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     /// </summary>
     /// <param name="pullRequest">The verified pull request.</param>
     /// <param name="cancellationToken">Cancels the merge request.</param>
-    /// <returns>Whether GitHub accepted the merge.</returns>
-    public async Task<bool> MergeAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken)
+    /// <returns>The confirmed merge commit, or null when GitHub has not confirmed a merge.</returns>
+    public async Task<string?> MergeAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken)
     {
         var merge = await ExecuteAsync(["pr", "merge", Number(pullRequest), "--repo", pullRequest.Repository, "--squash",
             "--match-head-commit", pullRequest.Head], cancellationToken);
-        if (merge.ExitCode != 0) return false;
+        if (merge.ExitCode != 0) return null;
         var confirmed = await ExecuteAsync(["pr", "view", Number(pullRequest), "--repo", pullRequest.Repository,
-            "--json", "state", "--jq", ".state"], cancellationToken);
-        return confirmed.ExitCode == 0 && confirmed.Output.Trim() == "MERGED";
+            "--json", "state,mergeCommit"], cancellationToken);
+        RequireSuccess(confirmed);
+        using var document = JsonDocument.Parse(confirmed.Output);
+        if (Text(document.RootElement, "state") != "MERGED" ||
+            !document.RootElement.TryGetProperty("mergeCommit", out var commit) || commit.ValueKind != JsonValueKind.Object) return null;
+        var head = Text(commit, "oid");
+        return head.Length == 40 && head.All(char.IsAsciiHexDigit) ? head : null;
+    }
+
+    /// <summary>
+    /// Reads all reported checks and overall workflow completion for the exact merged revision.
+    /// </summary>
+    /// <param name="repository">The repository name.</param>
+    /// <param name="commit">The exact merge commit.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>The combined check results.</returns>
+    public async Task<IReadOnlyList<CheckSnapshot>> GetCommitChecksAsync(string repository, string commit,
+        CancellationToken cancellationToken)
+    {
+        var revision = Uri.EscapeDataString(commit);
+        var checks = new List<CheckSnapshot>();
+        var jobs = await ReadPagesAsync($"repos/{repository}/commits/{revision}/check-runs?filter=latest&per_page=100",
+            "check_runs", cancellationToken);
+        checks.AddRange(jobs.Where(job => !job.TryGetProperty("app", out var app) || app.ValueKind != JsonValueKind.Object ||
+            Text(app, "slug") != "dependabot").Select(job => new CheckSnapshot(Text(job, "name"),
+            Text(job, "status") == "completed" ? Text(job, "conclusion").ToUpperInvariant() : Text(job, "status").ToUpperInvariant(),
+            Text(job, "html_url"))));
+        var statuses = await ReadPagesAsync($"repos/{repository}/commits/{revision}/status?per_page=100", "statuses", cancellationToken);
+        checks.AddRange(statuses.Select(status => new CheckSnapshot(Text(status, "context"),
+            Text(status, "state").ToUpperInvariant(), Text(status, "target_url"))));
+        var runs = await ReadPagesAsync($"repos/{repository}/actions/runs?head_sha={revision}&per_page=100",
+            "workflow_runs", cancellationToken);
+        checks.AddRange(runs.Where(run => Text(run, "event") is "push" or "workflow_run")
+            .GroupBy(run => run.GetProperty("workflow_id").GetInt64())
+            .Select(group => group.MaxBy(run => run.GetProperty("id").GetInt64()))
+            .Select(run => new CheckSnapshot("workflow: " + Text(run, "name"),
+                Text(run, "status") == "completed" ? Text(run, "conclusion").ToUpperInvariant() : Text(run, "status").ToUpperInvariant(),
+                Text(run, "html_url"))));
+        return checks;
+    }
+
+    private async Task<JsonElement[]> ReadPagesAsync(string endpoint, string field, CancellationToken cancellationToken)
+    {
+        var result = await ExecuteAsync(["api", endpoint, "--paginate", "--slurp"], cancellationToken);
+        RequireSuccess(result);
+        using var document = JsonDocument.Parse(result.Output);
+        return document.RootElement.EnumerateArray().SelectMany(page => page.GetProperty(field).EnumerateArray())
+            .Select(value => value.Clone()).ToArray();
+    }
+
+    /// <summary>
+    /// Resolves a follow-up base commit and independently verifies that it includes the original merge.
+    /// </summary>
+    /// <param name="repository">The repository name.</param>
+    /// <param name="branch">The base branch.</param>
+    /// <param name="ancestor">The original merge commit.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>The confirmed descendant commit, or null.</returns>
+    public async Task<string?> GetBranchDescendantAsync(string repository, string branch, string ancestor,
+        CancellationToken cancellationToken)
+    {
+        var result = await ExecuteAsync(["api", $"repos/{repository}/commits/{Uri.EscapeDataString(branch)}", "--jq", ".sha"],
+            cancellationToken);
+        RequireSuccess(result);
+        var head = result.Output.Trim();
+        if (head == ancestor || head.Length != 40 || !head.All(char.IsAsciiHexDigit)) return null;
+        var comparison = await ExecuteAsync(["api", $"repos/{repository}/compare/{Uri.EscapeDataString(ancestor)}...{head}",
+            "--jq", ".status"], cancellationToken);
+        RequireSuccess(comparison);
+        return comparison.Output.Trim() == "ahead" ? head : null;
     }
 
     /// <summary>

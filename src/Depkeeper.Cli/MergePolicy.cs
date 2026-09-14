@@ -29,7 +29,18 @@ internal static class MergePolicy
         if (pullRequest.ReviewDecision is "CHANGES_REQUESTED" or "REVIEW_REQUIRED") return "A required review is outstanding.";
         if (pullRequest.MergeState is not ("CLEAN" or "HAS_HOOKS" or "UNSTABLE"))
             return $"GitHub merge gate: {pullRequest.MergeState}.";
-        var checks = pullRequest.Checks.Where(check =>
+        return GetChecksBlocker(pullRequest.Checks, profile);
+    }
+
+    /// <summary>
+    /// Evaluates current check results independently of pull request mergeability.
+    /// </summary>
+    /// <param name="reported">The reported checks for the exact commit.</param>
+    /// <param name="profile">The applicable check policy.</param>
+    /// <returns>A blocking reason, or null when verification passes.</returns>
+    internal static string? GetChecksBlocker(IReadOnlyList<CheckSnapshot> reported, RepositoryProfile profile)
+    {
+        var checks = reported.Where(check =>
             !(profile.AdvisoryChecks ?? []).Contains(check.Name, StringComparer.Ordinal)).ToArray();
         if (!checks.Any(check => check.State == "SUCCESS")) return "No successful CI checks were reported for this revision.";
         foreach (var name in profile.RequiredChecks ?? [])
@@ -57,8 +68,7 @@ internal static class MergePolicy
     /// <param name="pullRequest">The current pull request.</param>
     /// <returns>Whether at least one check is present and none remain pending.</returns>
     internal static bool ChecksFinished(PullRequestSnapshot pullRequest) => pullRequest.Checks.Count > 0 &&
-        pullRequest.Checks.All(check => check.State is "SUCCESS" or "NEUTRAL" or "SKIPPED" or "FAILURE" or "ERROR" or
-            "TIMED_OUT" or "ACTION_REQUIRED" or "CANCELLED");
+        pullRequest.Checks.All(check => check.Finished);
 
     /// <summary>
     /// Distinguishes unfinished CI and GitHub mergeability calculations from actionable blockers.

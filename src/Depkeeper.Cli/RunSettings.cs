@@ -63,6 +63,9 @@ internal sealed partial record RunSettings(string Model, string[] Repositories, 
             if (!ImageName().IsMatch(profile.Image) || profile.Verify is { Length: 0 } ||
                 (profile.Install ?? []).Any(string.IsNullOrWhiteSpace) || (profile.Verify ?? []).Any(string.IsNullOrWhiteSpace))
                 throw new InvalidDataException("Profiles require a valid container image and nonempty command arrays when specified.");
+            if ((profile.RequiredChecks ?? []).Concat(profile.AdvisoryChecks ?? []).Concat(profile.PostMergeChecks ?? [])
+                .Any(string.IsNullOrWhiteSpace))
+                throw new InvalidDataException("Configured check names must not be empty.");
         }
         var age = configuration.ReleaseAge ?? new ReleaseAgePolicy();
         age = age with

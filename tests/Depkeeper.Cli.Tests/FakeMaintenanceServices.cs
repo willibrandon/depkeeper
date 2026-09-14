@@ -50,8 +50,24 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     /// </summary>
     internal string? LastRepairLogs { get; private set; }
 
+    /// <summary>
+    /// Gets the exact merge commit checked after a merge.
+    /// </summary>
+    internal List<string> VerifiedCommits { get; } = [];
+
+    /// <summary>
+    /// Gets or sets post-merge verification results.
+    /// </summary>
+    internal Func<string, IReadOnlyList<CheckSnapshot>>? OnCommitChecks { get; set; }
+
+    /// <summary>
+    /// Gets or sets a confirmed descendant containing a follow-up fix.
+    /// </summary>
+    internal string? RecoveryCommit { get; set; }
+
     Task<IReadOnlyList<PullRequestSnapshot>> IGitHubGateway.ListAsync(string repository, CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<PullRequestSnapshot>>(PullRequests.Where(pr => pr.Repository == repository).ToArray());
+        Task.FromResult<IReadOnlyList<PullRequestSnapshot>>(PullRequests.Where(pr => pr.Repository == repository && pr.State == "OPEN")
+            .ToArray());
 
     Task<PullRequestSnapshot> IGitHubGateway.RefreshAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken)
     {
@@ -66,11 +82,24 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     Task<bool> IGitHubGateway.UpdateBranchAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken) =>
         Task.FromResult(false);
 
-    Task<bool> IGitHubGateway.MergeAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken)
+    Task<string?> IGitHubGateway.MergeAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken)
     {
         Merges++;
-        return Task.FromResult(AcceptMerge);
+        if (!AcceptMerge) return Task.FromResult<string?>(null);
+        var index = PullRequests.FindIndex(pr => pr.Key == pullRequest.Key);
+        PullRequests[index] = pullRequest with { State = "MERGED" };
+        return Task.FromResult<string?>(new string('c', 40));
     }
+
+    Task<IReadOnlyList<CheckSnapshot>> IGitHubGateway.GetCommitChecksAsync(string repository, string commit,
+        CancellationToken cancellationToken)
+    {
+        VerifiedCommits.Add(commit);
+        return Task.FromResult(OnCommitChecks?.Invoke(commit) ?? TestData.PullRequest().Checks);
+    }
+
+    Task<string?> IGitHubGateway.GetBranchDescendantAsync(string repository, string branch, string ancestor,
+        CancellationToken cancellationToken) => Task.FromResult(RecoveryCommit);
 
     Task IGitHubGateway.CommentAsync(PullRequestSnapshot pullRequest, string body, CancellationToken cancellationToken)
     {
