@@ -62,7 +62,8 @@ internal static class MaintenanceCommand
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20), MaxResponseContentBufferSize = 8 * 1024 * 1024 };
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("Depkeeper/0.1");
                 var docker = new DockerHubPublicationClient(http);
-                var publications = new PublicationClient(http, gateway.GetActionPublicationAsync, docker.GetAsync);
+                var mcr = new McrPublicationClient(http);
+                var publications = new PublicationClient(http, gateway.GetActionPublicationAsync, DockerPublicationAsync);
                 var ageGate = new ReleaseAgeGate(gateway.GetDependencyChangesAsync, publications.GetAsync,
                     codeOnly: gateway.IsCodeOnlyRecoveryAsync);
                 var controller = new MaintenanceRunner(gateway, repairer, store, redactor, ageGate);
@@ -85,6 +86,9 @@ internal static class MaintenanceCommand
                     .Select(group => $"{group.Key}: {group.Count()}")));
                 await output.WriteLineAsync($"Report: {reportPath}");
                 return entries.Any(entry => entry.Outcome == "blocked") ? 2 : 0;
+
+                async Task<DateTimeOffset?> DockerPublicationAsync(DependencyChange dependency, CancellationToken token) =>
+                    await docker.GetAsync(dependency, token) ?? await mcr.GetAsync(dependency, token);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return 130; }
             catch (Exception exception) when (FailurePolicy.CanReport(exception))
