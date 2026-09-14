@@ -26,6 +26,8 @@ gh variable set DEPKEEPER_REPOSITORIES --body '["OWNER/REPOSITORY"]'
 
 The **Maintenance** workflow runs daily at **09:17 UTC**. Its manual trigger
 defaults to a dry run. Each deployment uses its own account and repository list.
+This repository is included in its own deployment list and uses Dependabot for
+NuGet and GitHub Actions updates.
 
 ## Run locally
 
