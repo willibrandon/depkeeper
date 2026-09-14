@@ -22,14 +22,14 @@ if (response.ExitCode != 0)
     return 1;
 }
 using var document = JsonDocument.Parse(response.Output);
-foreach (var run in document.RootElement.EnumerateArray()
+foreach (var id in document.RootElement.EnumerateArray()
     .SelectMany(page => page.GetProperty("artifacts").EnumerateArray())
     .Where(artifact => !artifact.GetProperty("expired").GetBoolean())
     .OrderByDescending(artifact => artifact.GetProperty("created_at").GetDateTimeOffset())
     .Select(artifact => artifact.GetProperty("workflow_run"))
-    .Where(run => run.GetProperty("head_branch").GetString() == branch))
+    .Where(run => run.GetProperty("head_branch").GetString() == branch)
+    .Select(run => run.GetProperty("id").GetRawText()))
 {
-    var id = run.GetProperty("id").GetRawText();
     var metadata = await ProcessRunner.RunAsync("gh",
         ["run", "view", id, "--repo", repository, "--json", "workflowName", "--jq", ".workflowName"]);
     if (metadata.ExitCode != 0 || metadata.Output.Trim() != "Maintenance") continue;
