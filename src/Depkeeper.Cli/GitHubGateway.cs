@@ -506,7 +506,8 @@ internal sealed partial class GitHubGateway : IGitHubGateway
             }
         }
         var dockerChanges = await GetDockerChangesAsync(pullRequest, cancellationToken);
-        return changes.Concat(dockerChanges).Distinct().ToArray();
+        var mavenChanges = await GetMavenChangesAsync(pullRequest, cancellationToken);
+        return changes.Concat(dockerChanges).Concat(mavenChanges).Distinct().ToArray();
     }
 
     /// <summary>
@@ -533,6 +534,22 @@ internal sealed partial class GitHubGateway : IGitHubGateway
                 path, cancellationToken);
             var after = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.Head, path, cancellationToken);
             changes.AddRange(DockerDependencyParser.Compare(before, after));
+        }
+        return changes;
+    }
+
+    private async Task<IReadOnlyList<DependencyChange>> GetMavenChangesAsync(PullRequestSnapshot pullRequest,
+        CancellationToken cancellationToken)
+    {
+        var files = await GetPullRequestFilesAsync(pullRequest, cancellationToken);
+        var changes = new List<DependencyChange>();
+        foreach (var path in files.Select(file => Text(file, "filename"))
+            .Where(path => Path.GetFileName(path).Equals("pom.xml", StringComparison.OrdinalIgnoreCase)))
+        {
+            var before = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.BaseHead ?? pullRequest.BaseBranch,
+                path, cancellationToken);
+            var after = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.Head, path, cancellationToken);
+            changes.AddRange(MavenDependencyParser.Compare(before, after));
         }
         return changes;
     }
