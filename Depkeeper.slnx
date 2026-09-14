@@ -2,4 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Depkeeper.Cli/Depkeeper.Cli.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Depkeeper.Cli.Tests/Depkeeper.Cli.Tests.csproj" />
+  </Folder>
 </Solution>

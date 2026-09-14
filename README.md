@@ -2,8 +2,6 @@
 
 Daily dependency maintenance powered by GitHub Copilot.
 
-**Status:** .NET scaffold with a Copilot SDK connectivity command.
-
 ## Design
 
 Depkeeper will discover Dependabot PRs, repair failed checks where possible,
@@ -24,6 +22,7 @@ Use the latest .NET 10 SDK.
 ```sh
 dotnet restore
 dotnet build --no-restore
+dotnet test --solution Depkeeper.slnx
 dotnet run --project src/Depkeeper.Cli -- --help
 ```
 

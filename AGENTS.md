@@ -1,6 +1,13 @@
 # Working on Depkeeper
 
 - Use .NET 10 and the official GitHub.Copilot.SDK package for agent integration.
+- Use the latest stable System.CommandLine release for command-line parsing.
+- Manage NuGet versions centrally in Directory.Packages.props; keep project PackageReference entries version-free.
+- Use MSTest with Microsoft.Testing.Platform for tests.
+- Enforce .editorconfig through build analyzers and dotnet format; keep warnings-as-errors and public XML documentation enabled.
+- Keep one type per file. A top-level Program.cs entry point is allowed.
+- Document every public and internal type and member with triple-slash XML comments.
+- Write each summary on three lines: opening tag, description, and closing tag.
 - Use Picket for secret scanning; resolve its latest published release at runtime.
 - Keep repository owners, project languages, and verification commands configurable.
 - Keep credentials in runtime secret storage; commit only secret names and placeholders.
