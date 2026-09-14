@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Depkeeper.Cli/Depkeeper.Cli.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Version>0.1.0</Version>
+    <Description>Dependency maintenance powered by GitHub Copilot.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="GitHub.Copilot.SDK" Version="1.0.13" />
+  </ItemGroup>
+</Project>
