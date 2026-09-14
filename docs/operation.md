@@ -56,6 +56,9 @@ created. Changes that may alter dependencies remain subject to publication-age p
 - Exit `0` means the sweep completed; `2` means it reported blockers; `1` means a run-level
   failure. State and report artifacts remain available for inspection.
 
+The workflow wrapper treats controller exit `2` as a completed run because actionable
+blockers are persisted and reported. Exit `1` and cancellation still fail the workflow.
+
 The workflow serializes sweeps. Checkpoints are retained for 90 days. After a longer
 inactivity period, no retained checkpoint means a fresh attempt history.
 
