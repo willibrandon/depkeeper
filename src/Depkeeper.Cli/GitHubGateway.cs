@@ -126,10 +126,9 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         RequireSuccess(result);
         using var document = JsonDocument.Parse(result.Output);
         var threads = new List<ReviewThread>();
-        foreach (var page in document.RootElement.EnumerateArray())
+        foreach (var reviewThreads in document.RootElement.EnumerateArray().Select(page =>
+            page.GetProperty("data").GetProperty("repository").GetProperty("pullRequest").GetProperty("reviewThreads")))
         {
-            var reviewThreads = page.GetProperty("data").GetProperty("repository").GetProperty("pullRequest")
-                .GetProperty("reviewThreads");
             foreach (var thread in reviewThreads.GetProperty("nodes").EnumerateArray()
                 .Where(thread => !thread.GetProperty("isResolved").GetBoolean()))
             {
