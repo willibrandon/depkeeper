@@ -63,6 +63,8 @@ internal sealed class CopilotRepairer : IRepairer
             var toolchain = ToolchainDetector.Resolve(directory, profile);
             var install = toolchain.Install;
             var verify = toolchain.Verify;
+            var licenseInventory = manifests.ContainsKey("package.json") &&
+                verify.Any(command => command.EndsWith(" run check:licenses", StringComparison.Ordinal));
             var image = toolchain.Name == "node" && profile.Image == "auto"
                 ? await NodeImageBuilder.BuildAsync(toolchain.Image, File.Exists(Path.Join(directory, "Cargo.toml")), cancellationToken)
                 : toolchain.Image;
@@ -85,7 +87,8 @@ internal sealed class CopilotRepairer : IRepairer
             if (paths.Length > 30) throw new InvalidOperationException("Repair touched more than 30 files; manual review is required.");
             foreach (var path in paths)
             {
-                if (!policy.Allows(path, true) || !File.Exists(Path.Join(directory, path)))
+                if (!policy.Allows(path, true) || !File.Exists(Path.Join(directory, path)) &&
+                    !(licenseInventory && WorkspacePolicy.IsGeneratedLicense(path)))
                     throw new InvalidOperationException($"Repair changed a protected path, deleted a file, or introduced a link: {path}.");
                 if (manifests.TryGetValue(path, out var before) &&
                     !WorkspacePolicy.PreservesManifest(before,
@@ -108,7 +111,8 @@ internal sealed class CopilotRepairer : IRepairer
             Require(staged);
             var stagedPaths = staged.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
             if (stagedPaths.Length > 30 ||
-                stagedPaths.Any(path => !policy.Allows(path, true) || !File.Exists(Path.Join(directory, path))))
+                stagedPaths.Any(path => !policy.Allows(path, true) || !File.Exists(Path.Join(directory, path)) &&
+                    !(licenseInventory && WorkspacePolicy.IsGeneratedLicense(path))))
                 throw new InvalidOperationException("Validation produced prohibited changes; the candidate was not pushed.");
             foreach (var path in stagedPaths.Where(manifests.ContainsKey))
             {

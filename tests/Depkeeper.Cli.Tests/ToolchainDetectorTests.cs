@@ -7,6 +7,25 @@ namespace Depkeeper.Cli.Tests;
 public sealed class ToolchainDetectorTests
 {
     /// <summary>
+    /// Uses the repository's complete verification command and keeps an explicit original license check.
+    /// </summary>
+    [TestMethod]
+    public void PrefersFullVerificationAndValidatesLicenseInventory()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-toolchain-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Join(directory, "package.json"), """
+                {"scripts":{"verify":"run-all-checks","check":"one-check","check:licenses":"check-generated-licenses"}}
+                """);
+            var profile = ToolchainDetector.Resolve(directory, new RepositoryProfile());
+            Assert.AreEqual("npm run verify", profile.Verify.First());
+            Assert.Contains("npm run check:licenses", profile.Verify);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
     /// Honors exact Node and npm declarations to reproduce the repository's validation environment.
     /// </summary>
     [TestMethod]

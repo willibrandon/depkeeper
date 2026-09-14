@@ -9,6 +9,9 @@ Before pushing, Depkeeper reruns the original verification commands and scans th
 candidate with Picket. It refuses deleted files, symbolic-link escapes, security/CI
 configuration changes, and changes to npm scripts, identity, version, or engines.
 Those cases are reported for manual review rather than bypassing checks.
+Generated `LICENSES/*.txt` entries may be removed when the original npm license check
+is selected and passes independent verification. Node projects use their full `verify`
+script when available.
 
 Before merging, it refreshes the PR, checks the exact revision, reevaluates publication
 age, and lets GitHub enforce branch rules. Missing, pending, failed, or unexpectedly
