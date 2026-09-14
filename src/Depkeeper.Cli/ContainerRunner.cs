@@ -52,7 +52,7 @@ internal sealed class ContainerRunner : IDisposable
                 "--mount", $"type=bind,source={cache},target=/cache",
                 "--mount", $"type=bind,source={_directory},target=/workspace",
                 "--mount", $"type=bind,source={Path.Join(_directory, ".git")},target=/workspace/.git,readonly",
-                _image, "sh", "-c", "export PATH=/cache/toolchain/node_modules/.bin:$PATH; " + command
+                _image, "sh", "-c", "export PATH=/cache/toolchain/bin:/cache/toolchain/node_modules/.bin:$PATH; " + command
             };
             var result = await ProcessRunner.RunAsync("docker", arguments, cancellationToken: cancellationToken);
             return result with { Output = _redactor.Clean(result.Output), Error = _redactor.Clean(result.Error) };

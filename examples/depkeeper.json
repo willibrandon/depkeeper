@@ -9,6 +9,7 @@
   "profiles": {
     "OWNER/REPOSITORY": {
       "image": "node:24-trixie",
+      "prepare": ["install-trusted-tool"],
       "install": ["npm ci"],
       "verify": ["npm test", "npm run build"],
       "requiredChecks": ["Quality and bundles"],
