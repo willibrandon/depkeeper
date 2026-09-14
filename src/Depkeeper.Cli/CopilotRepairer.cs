@@ -64,7 +64,9 @@ internal sealed class CopilotRepairer : IRepairer
             var toolchain = ToolchainDetector.Resolve(directory, profile);
             var install = toolchain.Install;
             var verify = toolchain.Verify;
-            using var container = new ContainerRunner(directory, toolchain.Image, _redactor);
+            var image = toolchain.Name == "node" && profile.Image == "auto"
+                ? await NodeImageBuilder.BuildAsync(toolchain.Image, cancellationToken) : toolchain.Image;
+            using var container = new ContainerRunner(directory, image, _redactor);
             var setup = await container.RunAsync(string.Join(" && ", install), cancellationToken);
             var initialDiagnostics = setup.ExitCode == 0 ? string.Empty :
                 "Initial dependency installation failed:\n" + Tail(setup.Error + setup.Output);

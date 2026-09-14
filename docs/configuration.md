@@ -21,6 +21,8 @@ Profiles can supply `image`, `install`, `verify`, `requiredChecks`, `advisoryChe
 and `releaseAge`. Explicit image and command overrides take precedence over detection.
 Commands use the image's POSIX shell and PATH. Exact Node engine versions and npm
 `packageManager` declarations are honored; other version ranges use the default image.
+Detected Node images include controller-installed CMake, Ninja, and pkg-config for
+native addon and parser builds. Explicit image overrides supply their own prerequisites.
 
 | Detected manifests | Default validation |
 | --- | --- |
