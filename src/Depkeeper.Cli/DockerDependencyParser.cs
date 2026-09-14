@@ -37,14 +37,10 @@ internal static partial class DockerDependencyParser
             name.StartsWith("Containerfile.", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static IEnumerable<DockerImageReference> Parse(string? content)
-    {
-        if (content is null) yield break;
-        foreach (Match match in FromInstruction().Matches(content))
-        {
-            if (DockerImageReference.TryParse(match.Groups["image"].Value, out var reference)) yield return reference!;
-        }
-    }
+    private static IEnumerable<DockerImageReference> Parse(string? content) => content is null ? [] :
+        FromInstruction().Matches(content).Cast<Match>()
+            .Select(match => DockerImageReference.TryParse(match.Groups["image"].Value, out var reference) ? reference : null)
+            .OfType<DockerImageReference>();
 
     private static DependencyChange Change(string type, DockerImageReference reference) =>
         new(type, "docker", reference.Name, reference.Version, []);
