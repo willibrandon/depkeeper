@@ -6,6 +6,8 @@
 - Manage NuGet versions centrally in Directory.Packages.props; keep project PackageReference entries version-free.
 - Resolve the latest stable NuGet packages using floating CPM versions; do not add NuGet lock files or fixed SDK pins.
 - Use MSTest with Microsoft.Testing.Platform for tests.
+- Pass TestContext.CancellationToken to cancellable operations in tests; MSTEST0049 is an error.
+- Use Assert.Contains instead of StringAssert.Contains; MSTEST0046 is an error.
 - Enforce .editorconfig through build analyzers and dotnet format; keep warnings-as-errors and public XML documentation enabled.
 - Keep one type per file. A top-level Program.cs entry point is allowed.
 - Document every public and internal type and member with triple-slash XML comments.

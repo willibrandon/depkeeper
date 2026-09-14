@@ -8,6 +8,17 @@ namespace Depkeeper.Cli.Tests;
 [TestClass]
 public sealed class CommandsTests
 {
+    private readonly TestContext _testContext;
+
+    /// <summary>
+    /// Initializes the tests with the context supplied by MSTest.
+    /// </summary>
+    /// <param name="testContext">The context for the current test execution.</param>
+    public CommandsTests(TestContext testContext)
+    {
+        _testContext = testContext;
+    }
+
     /// <summary>
     /// Informational commands complete without accessing authentication.
     /// </summary>
@@ -23,7 +34,7 @@ public sealed class CommandsTests
         using var error = new StringWriter(CultureInfo.InvariantCulture);
 
         var exitCode = await Commands.RunAsync([command], output, error,
-            () => throw new InvalidOperationException("Credentials must not be accessed."));
+            () => throw new InvalidOperationException("Credentials must not be accessed."), _testContext.CancellationToken);
 
         Assert.AreEqual(0, exitCode);
         Assert.IsFalse(string.IsNullOrWhiteSpace(output.ToString()));
@@ -41,9 +52,9 @@ public sealed class CommandsTests
         using var error = new StringWriter(CultureInfo.InvariantCulture);
 
         var exitCode = await Commands.RunAsync(["unknown"], output, error,
-            () => throw new InvalidOperationException("Credentials must not be accessed."));
+            () => throw new InvalidOperationException("Credentials must not be accessed."), _testContext.CancellationToken);
 
         Assert.AreEqual(2, exitCode);
-        StringAssert.Contains(error.ToString(), "unknown");
+        Assert.Contains("unknown", error.ToString());
     }
 }
