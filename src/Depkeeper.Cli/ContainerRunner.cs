@@ -48,6 +48,7 @@ internal sealed class ContainerRunner : IDisposable
                 "--env", "CARGO_HOME=/cache/cargo", "--env", "GOPATH=/cache/go", "--env", "GOCACHE=/cache/go-build",
                 "--env", "GRADLE_USER_HOME=/cache/gradle", "--env", "BUNDLE_PATH=/cache/bundle",
                 "--env", "NUGET_PACKAGES=/cache/nuget", "--env", "DOTNET_CLI_TELEMETRY_OPTOUT=1",
+                "--env", "GIT_CONFIG_COUNT=1", "--env", "GIT_CONFIG_KEY_0=safe.directory", "--env", "GIT_CONFIG_VALUE_0=/workspace",
                 "--mount", $"type=bind,source={cache},target=/cache",
                 "--mount", $"type=bind,source={_directory},target=/workspace",
                 "--mount", $"type=bind,source={Path.Combine(_directory, ".git")},target=/workspace/.git,readonly",

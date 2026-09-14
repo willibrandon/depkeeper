@@ -96,9 +96,9 @@ internal sealed class CopilotRepairer : IRepairer
             var validation = await container.RunAsync(string.Join(" && ", install.Concat(verify)), cancellationToken);
             if (validation.ExitCode != 0)
             {
-                var diagnostics = validation.Error + validation.Output;
-                throw new InvalidOperationException("Independent validation failed: " +
-                    (diagnostics.Length > 1200 ? diagnostics[^1200..] : diagnostics));
+                var error = validation.Error.Length > 800 ? validation.Error[^800..] : validation.Error;
+                var output = validation.Output.Length > 400 ? validation.Output[^400..] : validation.Output;
+                throw new InvalidOperationException("Independent validation failed: " + error + "\nOutput: " + output);
             }
             // Include files created during verification in the final guard and secret scan.
             Require(await GitAsync(directory, ["add", "--all"], cancellationToken));
