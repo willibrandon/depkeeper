@@ -55,8 +55,9 @@ review supplies concrete version changes; deps.dev supplies public publication d
 for npm, NuGet, PyPI, Cargo, Go, and Maven. GitHub Actions references are matched to
 GitHub releases by their actual commit. Docker Hub tags are accepted only when the full
 PR digest matches Docker Hub's current digest, then use `tag_last_pushed`. Unsupported
-or unavailable metadata holds the update and is reported; MCR, Swift, and private
-registries may require manual review.
+MCR tags are accepted only when the full digest matches Microsoft's catalog record,
+then use its `lastModifiedDate`. Unsupported or unavailable metadata holds the update
+and is reported; Swift and private registries may require manual review.
 
 Verified security fixes can bypass the delay when GitHub reports a vulnerable package
 being replaced and no introduced version has known advisories. Labels and PR titles
