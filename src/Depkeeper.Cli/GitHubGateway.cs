@@ -568,10 +568,17 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     {
         var parts = dependency.Name.Split('/');
         if (parts.Length < 2 || !RunSettings.IsRepository(parts[0] + "/" + parts[1])) return null;
-        var reference = Uri.EscapeDataString(dependency.Version);
-        var commit = await ExecuteAsync(["api", $"repos/{parts[0]}/{parts[1]}/commits/{reference}", "--jq", ".sha"],
-            cancellationToken);
-        if (commit.ExitCode != 0) return null;
+        string? commitId = null;
+        var references = ActionReferences(dependency.Version);
+        for (var index = 0; index < references.Count; index++)
+        {
+            var commit = await ExecuteAsync(["api", $"repos/{parts[0]}/{parts[1]}/commits/{Uri.EscapeDataString(references[index])}",
+                "--jq", ".sha"], cancellationToken);
+            if (commit.ExitCode != 0) continue;
+            commitId = commit.Output.Trim();
+            break;
+        }
+        if (commitId is null) return null;
         const string query = """
             query($owner:String!,$name:String!) {
               repository(owner:$owner,name:$name) {
@@ -588,10 +595,26 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         return document.RootElement.GetProperty("data").GetProperty("repository").GetProperty("releases")
             .GetProperty("nodes").EnumerateArray()
             .Where(release => release.TryGetProperty("tagCommit", out var tag) && tag.ValueKind == JsonValueKind.Object &&
-                Text(tag, "oid") == commit.Output.Trim())
+                Text(tag, "oid") == commitId)
             .Select(release => release.GetProperty("publishedAt").ValueKind == JsonValueKind.String &&
                 release.GetProperty("publishedAt").TryGetDateTimeOffset(out var published) ? published : (DateTimeOffset?)null)
             .Min();
+    }
+
+    /// <summary>
+    /// Converts dependency-review wildcard versions into the floating refs used by GitHub Actions workflows.
+    /// </summary>
+    /// <param name="version">GitHub's reported action version.</param>
+    /// <returns>Candidate refs from most specific to conservative fallback.</returns>
+    internal static IReadOnlyList<string> ActionReferences(string version)
+    {
+        var parts = version.Split('.');
+        if (parts.Length == 3 && parts[2] == "*" && parts[0].All(char.IsAsciiDigit))
+        {
+            if (parts[1] == "*") return ["v" + parts[0]];
+            if (parts[1].All(char.IsAsciiDigit)) return ["v" + parts[0] + "." + parts[1]];
+        }
+        return version.Length > 0 && char.IsAsciiDigit(version[0]) ? ["v" + version, version] : [version];
     }
 
     private Task<CommandResult> ExecuteAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken, string? input = null) =>
