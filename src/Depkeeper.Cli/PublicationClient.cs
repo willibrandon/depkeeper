@@ -11,6 +11,7 @@ internal sealed class PublicationClient
     private readonly Dictionary<string, DateTimeOffset?> _cache = new(StringComparer.Ordinal);
     private readonly Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? _actions;
     private readonly Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? _docker;
+    private readonly Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? _pypi;
 
     /// <summary>
     /// Creates a publication reader without GitHub or model credentials.
@@ -18,13 +19,16 @@ internal sealed class PublicationClient
     /// <param name="client">A credential-free HTTP client.</param>
     /// <param name="actions">Optional GitHub Actions publication lookup.</param>
     /// <param name="docker">Optional Docker Hub digest publication lookup.</param>
+    /// <param name="pypi">Optional exact PyPI publication lookup.</param>
     internal PublicationClient(HttpClient client,
         Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? actions = null,
-        Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? docker = null)
+        Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? docker = null,
+        Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? pypi = null)
     {
         _client = client;
         _actions = actions;
         _docker = docker;
+        _pypi = pypi;
     }
 
     /// <summary>
@@ -54,13 +58,20 @@ internal sealed class PublicationClient
         var url = $"https://api.deps.dev/v3/systems/{system}/packages/{Uri.EscapeDataString(dependency.Name)}/versions/" +
             Uri.EscapeDataString(dependency.Version);
         using var response = await _client.GetAsync(url, cancellationToken);
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return _cache[key] = null;
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return _cache[key] = await GetPyPiFallbackAsync(system, dependency, cancellationToken);
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         var published = document.RootElement.TryGetProperty("publishedAt", out var value) &&
             value.ValueKind == JsonValueKind.String && value.TryGetDateTimeOffset(out var date)
             ? date : (DateTimeOffset?)null;
+        if (published is null) published = await GetPyPiFallbackAsync(system, dependency, cancellationToken);
         _cache[key] = published;
         return published;
     }
+
+    private Task<DateTimeOffset?> GetPyPiFallbackAsync(string system, DependencyChange dependency,
+        CancellationToken cancellationToken) => system == "PYPI" && _pypi is not null
+            ? _pypi(dependency, cancellationToken)
+            : Task.FromResult<DateTimeOffset?>(null);
 }

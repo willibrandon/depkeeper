@@ -63,7 +63,9 @@ internal static class MaintenanceCommand
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("Depkeeper/0.1");
                 var docker = new DockerHubPublicationClient(http);
                 var mcr = new McrPublicationClient(http);
-                var publications = new PublicationClient(http, gateway.GetActionPublicationAsync, DockerPublicationAsync);
+                var pypi = new PyPiPublicationClient(http);
+                var publications = new PublicationClient(http, gateway.GetActionPublicationAsync, DockerPublicationAsync,
+                    pypi.GetAsync);
                 var ageGate = new ReleaseAgeGate(gateway.GetDependencyChangesAsync, publications.GetAsync,
                     codeOnly: gateway.IsCodeOnlyRecoveryAsync);
                 var controller = new MaintenanceRunner(gateway, repairer, store, redactor, ageGate);
