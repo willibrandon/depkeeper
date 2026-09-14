@@ -64,6 +64,17 @@ internal sealed class WorkspacePolicy
     }
 
     /// <summary>
+    /// Identifies generated license inventory entries that may be removed when the original license check passes.
+    /// </summary>
+    /// <param name="relative">The repository-relative path.</param>
+    /// <returns>Whether the path is a single text entry in the generated license inventory.</returns>
+    internal static bool IsGeneratedLicense(string relative)
+    {
+        var parts = relative.Replace('\\', '/').Split('/');
+        return parts.Length == 2 && parts[0] == "LICENSES" && parts[1].EndsWith(".txt", StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Verifies that dependency edits preserve existing npm scripts and package identity.
     /// </summary>
     /// <param name="before">The manifest before repair.</param>

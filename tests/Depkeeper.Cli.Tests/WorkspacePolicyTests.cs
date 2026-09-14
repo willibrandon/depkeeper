@@ -7,6 +7,19 @@ namespace Depkeeper.Cli.Tests;
 public sealed class WorkspacePolicyTests
 {
     /// <summary>
+    /// Restricts generated-license cleanup to inventory text entries rather than source files or tests.
+    /// </summary>
+    [TestMethod]
+    public void RecognizesOnlyGeneratedLicenseEntries()
+    {
+        Assert.IsTrue(WorkspacePolicy.IsGeneratedLicense("LICENSES/ignore-7.0.6.txt"));
+        Assert.IsFalse(WorkspacePolicy.IsGeneratedLicense("test/example.test.ts"));
+        Assert.IsFalse(WorkspacePolicy.IsGeneratedLicense("LICENSES/../test.txt"));
+        Assert.IsFalse(WorkspacePolicy.IsGeneratedLicense("LICENSES/source.cs"));
+        Assert.IsFalse(WorkspacePolicy.IsGeneratedLicense("LICENSE"));
+    }
+
+    /// <summary>
     /// Rejects traversal, sibling directories, Git metadata, and verification policy edits.
     /// </summary>
     [TestMethod]

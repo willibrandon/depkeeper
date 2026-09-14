@@ -108,11 +108,14 @@ internal static partial class ToolchainDetector
             _ => File.Exists(Path.Join(directory, "package-lock.json")) ? "npm ci" : "npm install"
         };
         var run = manager == "npm" ? "npm run " : "corepack " + manager + " run ";
-        var verify = scripts.TryGetProperty("check", out _) ? [run + "check"] :
+        var verify = scripts.TryGetProperty("verify", out _) ? [run + "verify"] :
+            scripts.TryGetProperty("check", out _) ? [run + "check"] :
             new[] { "check:generated", "format:check", "lint", "typecheck",
                 scripts.TryGetProperty("test:coverage", out _) ? "test:coverage" : "test", "build", "audit" }
                 .Where(name => scripts.TryGetProperty(name, out _)).Select(name => run + name).ToArray();
         if (verify.Length == 0) throw new InvalidOperationException("No verification commands were found for this Node project.");
+        if (scripts.TryGetProperty("check:licenses", out _))
+            verify = verify.Append(run + "check:licenses").Distinct(StringComparer.Ordinal).ToArray();
         setup.Add(install);
         return new ToolchainProfile("node", image, setup.ToArray(), verify);
     }
