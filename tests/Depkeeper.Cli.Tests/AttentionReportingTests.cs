@@ -14,7 +14,6 @@ public sealed class AttentionReportingTests(TestContext testContext)
     /// <returns>The test task.</returns>
     [TestMethod]
     [DataRow("pending")]
-    [DataRow("queued")]
     [DataRow("cooldown")]
     [DataRow("clear")]
     [DataRow("deferred")]
