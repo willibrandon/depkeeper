@@ -52,7 +52,8 @@ and [Renovate's npm security preset](https://docs.renovatebot.com/presets-securi
 
 Age is measured from publication metadata, never PR creation time. GitHub dependency
 review supplies concrete version changes; deps.dev supplies public publication dates
-for npm, NuGet, PyPI, Cargo, Go, and Maven. GitHub Actions references are matched to
+for npm, NuGet, PyPI, Cargo, Go, and Maven. Missing PyPI records fall back to the
+exact release's earliest artifact upload from PyPI. GitHub Actions references are matched to
 GitHub releases by their actual commit. Docker Hub tags are accepted only when the full
 PR digest matches Docker Hub's current digest, then use `tag_last_pushed`. Unsupported
 MCR tags are accepted only when the full digest matches Microsoft's catalog record,
