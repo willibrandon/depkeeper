@@ -146,7 +146,9 @@ public sealed class PostMergeVerificationTests(TestContext testContext)
             var path = Path.Join(directory, "state.json");
             var runner = new MaintenanceRunner(services, services, new StateStore(path), new Redactor(), TestData.AgeGate());
             var results = await runner.RunAsync(TestData.Settings() with { CiTimeout = TimeSpan.Zero }, testContext.CancellationToken);
-            Assert.AreEqual("pending", results.Single().Outcome);
+            Assert.AreEqual("queued", results.Single().Outcome);
+            Assert.Contains("Exact-commit verification queued", results.Single().Detail);
+            Assert.DoesNotContain("has failed or is still running", results.Single().Detail);
             Assert.IsFalse(new StateStore(path).State.PullRequests.Values.Single().Blocked);
             services.OnCommitChecks = _ => [new CheckSnapshot("build", "SUCCESS", "")];
             runner = new MaintenanceRunner(services, services, new StateStore(path), new Redactor(), TestData.AgeGate());

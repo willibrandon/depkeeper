@@ -24,7 +24,7 @@ internal static class MaintenanceCommand
         var repairs = new Option<int>("--max-repairs") { DefaultValueFactory = _ => 3 };
         var attempts = new Option<int>("--max-attempts") { DefaultValueFactory = _ => 2 };
         var repairMinutes = new Option<int>("--repair-minutes") { DefaultValueFactory = _ => 30 };
-        var ciMinutes = new Option<int>("--ci-minutes") { DefaultValueFactory = _ => 15 };
+        var ciMinutes = new Option<int>("--ci-minutes") { DefaultValueFactory = _ => 20 };
         var pr = new Option<int?>("--pr") { Description = "Inspect one PR in one selected repository." };
         var releaseAge = new Option<int?>("--minimum-release-age-days") { Description = "Publication cooldown (default: 3 days)." };
         var unknownAge = new Option<bool>("--allow-unknown-age") { Description = "Explicitly allow missing publication metadata." };

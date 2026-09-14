@@ -111,12 +111,14 @@ internal sealed class PostMergeVerifier
                 if (remaining <= TimeSpan.Zero) break;
                 await Task.Delay(remaining < _pollInterval ? remaining : _pollInterval, _clock, cancellationToken);
             }
+            var pending = !failed && (checks.Count == 0 || checks.Any(check => !check.Finished));
             if (failed) reason = "Failed checks: " + string.Join(", ", checks.Where(check => check.Failed &&
                 !(profile.AdvisoryChecks ?? []).Contains(check.Name, StringComparer.Ordinal)).Select(check => check.Name));
-            var outcome = reason is null ? "merged" : failed ? "blocked" :
-                checks.Count == 0 || checks.Any(check => !check.Finished) ? "pending" : "blocked";
+            else if (pending) reason = "Exact-commit verification queued.";
+            var outcome = reason is null ? "merged" : failed ? "blocked" : pending ? "queued" : "blocked";
             var subject = attempt.Recovery?.PullRequest is int recovery ? $"Recovery PR #{recovery} merged as {head}" : $"Merged as {head}";
-            var detail = reason is null ? $"{subject}; post-merge CI passed." : $"{subject}; post-merge verification: {reason}";
+            var detail = reason is null ? $"{subject}; post-merge CI passed." : pending ? $"{subject}; {reason}" :
+                $"{subject}; post-merge verification: {reason}";
             entry = new ReportEntry(repository, number, outcome, detail);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
