@@ -39,6 +39,9 @@ internal static partial class NpmLockResolver
             if (packages.TryGetProperty(location, out var installed))
             {
                 if (installed.TryGetProperty("link", out var link) && link.ValueKind == JsonValueKind.True) return null;
+                if (!installed.TryGetProperty("resolved", out var resolved) || resolved.ValueKind != JsonValueKind.String ||
+                    !Uri.TryCreate(resolved.GetString(), UriKind.Absolute, out var source) ||
+                    source.Scheme != "https" || source.Host != "registry.npmjs.org") return null;
                 return installed.TryGetProperty("version", out var version) && version.ValueKind == JsonValueKind.String &&
                     IsExact(version.GetString()!) ? version.GetString() : null;
             }
