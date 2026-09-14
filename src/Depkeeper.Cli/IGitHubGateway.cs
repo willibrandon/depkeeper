@@ -42,8 +42,27 @@ internal interface IGitHubGateway
     /// </summary>
     /// <param name="pullRequest">The expected pull request revision.</param>
     /// <param name="cancellationToken">Cancels the merge request.</param>
-    /// <returns>Whether GitHub accepted the merge.</returns>
-    Task<bool> MergeAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken);
+    /// <returns>The confirmed merge commit, or null when GitHub has not confirmed a merge.</returns>
+    Task<string?> MergeAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Retrieves checks, statuses, and workflow completion for an exact commit.
+    /// </summary>
+    /// <param name="repository">The repository name.</param>
+    /// <param name="commit">The exact commit to verify.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>The reported verification results.</returns>
+    Task<IReadOnlyList<CheckSnapshot>> GetCommitChecksAsync(string repository, string commit, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Finds the current base revision only when it is a descendant of the tracked merged commit.
+    /// </summary>
+    /// <param name="repository">The repository name.</param>
+    /// <param name="branch">The merged PR's base branch.</param>
+    /// <param name="ancestor">The tracked merge commit.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>A later descendant commit, or null.</returns>
+    Task<string?> GetBranchDescendantAsync(string repository, string branch, string ancestor, CancellationToken cancellationToken);
 
     /// <summary>
     /// Publishes an actionable outcome on a pull request.

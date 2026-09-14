@@ -8,4 +8,7 @@ namespace Depkeeper.Cli;
 /// <param name="Blocked">Whether automatic repairs must stop for this revision.</param>
 /// <param name="Reason">A sanitized explanation.</param>
 /// <param name="UpdatedAt">The last state transition.</param>
-internal sealed record AttemptState(string Head, int Attempts, bool Blocked, string Reason, DateTimeOffset UpdatedAt);
+/// <param name="MergeHead">A merged commit whose post-merge verification is still tracked.</param>
+/// <param name="MergeBranch">The base branch to inspect for a verified follow-up fix.</param>
+internal sealed record AttemptState(string Head, int Attempts, bool Blocked, string Reason, DateTimeOffset UpdatedAt,
+    string? MergeHead = null, string? MergeBranch = null);

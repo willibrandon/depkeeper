@@ -15,13 +15,22 @@ age, and lets GitHub enforce branch rules. Missing, pending, failed, or unexpect
 skipped required checks prevent merging. Explicitly configured advisory failures are
 reported. The bot does not create release tags.
 
+After merging, it records the resulting commit and verifies that commit's checks,
+statuses, and complete push workflows. A successful PR check does not substitute for
+post-merge CI. `requiredChecks` also applies after merging unless `postMergeChecks`
+selects a different set of mandatory contexts for the base branch.
+Unfinished verification is retained across sweeps, and post-merge failures pause further
+updates in that repository. A later base commit can resolve the blocker after both its
+ancestry and its own CI are verified.
+
 ## Reports and recovery
 
-- `.state/state.json` checkpoints attempts before repair starts and after candidate pushes.
+- `.state/state.json` checkpoints attempts before repair starts, after candidate pushes,
+  and while verifying merged commits.
 - The workflow restores the latest retained checkpoint and uploads it even after failures.
 - `.state/report.md` and the Actions summary show every outcome.
 - Actionable blockers open or update a managed issue in the affected repository. Successful
-  merges close the corresponding managed issue. Pending CI and cooldowns do not open issues.
+  post-merge verification closes the corresponding managed issue. Pending CI and cooldowns do not open issues.
   `--report-repo OWNER/REPO` explicitly selects a central destination instead.
 - An unchanged blocked revision is not automatically attempted again. A new head or an
   explicit `--retry-blocked` permits reconsideration.

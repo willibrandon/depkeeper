@@ -31,6 +31,7 @@
 - Read the existing repository labels before adding one or two relevant labels to a PR.
 - When a new label is needed, create it with both a color and a description.
 - Verify the repository's open CodeQL alerts after merging, including informational findings; a successful scan alone is insufficient.
+- Verify CI on the exact resulting commit after pushes and merges; do not infer post-merge success from PR checks.
 
 ## Read-only references
 

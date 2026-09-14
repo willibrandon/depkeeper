@@ -17,7 +17,7 @@ An optional `depkeeper.json` configures repository-specific environments and che
 See [the example](../examples/depkeeper.json). CLI selections override repository/model
 defaults; Actions variables override the file's repository/model defaults.
 
-Profiles can supply `image`, `install`, `verify`, `requiredChecks`, `advisoryChecks`,
+Profiles can supply `image`, `install`, `verify`, `requiredChecks`, `postMergeChecks`, `advisoryChecks`,
 and `releaseAge`. Explicit image and command overrides take precedence over detection.
 Commands use the image's POSIX shell and PATH. Exact Node engine versions and npm
 `packageManager` declarations are honored; other version ranges use the default image.

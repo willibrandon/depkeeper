@@ -12,6 +12,7 @@ internal sealed class MaintenanceRunner
     private readonly TimeProvider _clock;
     private readonly IReleaseAgeGate _releaseAge;
     private readonly TimeSpan _pollInterval;
+    private readonly PostMergeVerifier _postMerge;
 
     /// <summary>
     /// Creates a controller with replaceable GitHub and repair boundaries.
@@ -33,6 +34,7 @@ internal sealed class MaintenanceRunner
         _clock = clock ?? TimeProvider.System;
         _releaseAge = releaseAge;
         _pollInterval = pollInterval ?? TimeSpan.FromSeconds(10);
+        _postMerge = new PostMergeVerifier(github, state, redactor, _clock, _pollInterval);
     }
 
     /// <summary>
@@ -54,15 +56,19 @@ internal sealed class MaintenanceRunner
             try
             {
                 var profile = settings.Profiles.GetValueOrDefault(repository) ?? new RepositoryProfile();
+                var followups = await _postMerge.RecheckAsync(repository, profile, settings.DryRun, cancellationToken);
+                results.AddRange(followups);
+                var unresolvedMerge = followups.Any(entry => entry.Outcome != "merged");
                 var candidates = await _github.ListAsync(repository, cancellationToken);
                 var mutated = false;
                 foreach (var candidate in candidates.Where(pr => settings.OnlyPullRequest is null || pr.Number == settings.OnlyPullRequest)
                     .OrderBy(pr => MergePolicy.HasFailure(pr, profile)))
                 {
-                    if (mutated && !settings.DryRun)
+                    if (unresolvedMerge || mutated && !settings.DryRun)
                     {
                         results.Add(new ReportEntry(repository, candidate.Number, "deferred",
-                            "Another PR in this repository was updated; reassess against the new base next run."));
+                            unresolvedMerge ? "Post-merge verification is unresolved for this repository." :
+                                "Another PR in this repository was updated; reassess against the new base next run."));
                         continue;
                     }
                     var current = await _github.RefreshAsync(candidate, cancellationToken);
@@ -162,18 +168,18 @@ internal sealed class MaintenanceRunner
                                 MergePolicy.IsPending(current) ? "pending" : "blocked", reason));
                             continue;
                         }
-                        if (!await _github.MergeAsync(current, cancellationToken))
+                        var mergeHead = await _github.MergeAsync(current, cancellationToken) ??
                             throw new InvalidOperationException(
                                 "GitHub did not confirm a merge; inspect branch rules, merge queues, and review threads.");
                         mutated = true;
-                        _state.State.PullRequests.Remove(current.Key);
-                        _state.Save();
+                        var mergedAttempt = new AttemptState(current.Head, attempts, false, "Waiting for post-merge CI.",
+                            _clock.GetUtcNow(), mergeHead, current.BaseBranch);
+                        _state.Set(current.Key, mergedAttempt);
+                        results.Add(await _postMerge.VerifyAsync(repository, current.Number, mergedAttempt, profile, false,
+                            settings.CiTimeout, cancellationToken));
                         var advisory = current.Checks.Where(check =>
                             (profile.AdvisoryChecks ?? []).Contains(check.Name, StringComparer.Ordinal) &&
                             check.State is not ("SUCCESS" or "NEUTRAL" or "SKIPPED")).Select(check => check.Name).ToArray();
-                        results.Add(new ReportEntry(repository, current.Number, "merged", attempts > 0 ?
-                            "Repaired, verified by fresh CI, and merged." :
-                            "Verified existing CI and merged."));
                         if (advisory.Length > 0) results.Add(new ReportEntry(repository, current.Number, "advisory",
                             "Nonblocking checks: " + string.Join(", ", advisory)));
                     }
@@ -195,7 +201,8 @@ internal sealed class MaintenanceRunner
                         }
                     }
                 }
-                if (candidates.Count == 0) results.Add(new ReportEntry(repository, 0, "clear", "No open Dependabot PRs."));
+                if (candidates.Count == 0 && followups.Count == 0)
+                    results.Add(new ReportEntry(repository, 0, "clear", "No open Dependabot PRs."));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception exception) when (FailurePolicy.CanReport(exception))
