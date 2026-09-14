@@ -41,7 +41,9 @@ internal sealed class ReleaseAgeGate : IReleaseAgeGate
                 return policy.AllowUnknown ? null :
                     "GitHub returned no dependency changes; this update's publication age cannot be verified.";
             var added = changes.Where(change => change.ChangeType == "added")
-                .DistinctBy(change => (change.Ecosystem, change.Name, change.Version)).ToArray();
+                .GroupBy(change => (change.Ecosystem, change.Name, change.Version))
+                .Select(group => group.First() with { Advisories = group.SelectMany(change => change.Advisories).Distinct().ToArray() })
+                .ToArray();
             if (added.Length == 0) return null;
             var securityFix = added.Any(update => changes.Any(change => change.ChangeType == "removed" &&
                 change.Ecosystem == update.Ecosystem && change.Name == update.Name && change.Advisories.Length > 0)) &&

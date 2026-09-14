@@ -14,16 +14,20 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         "mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,state";
     private readonly Dictionary<string, string?> _environment;
     private readonly Redactor _redactor;
+    private readonly Func<IReadOnlyList<string>, CancellationToken, string?, Task<CommandResult>>? _execute;
 
     /// <summary>
     /// Creates a GitHub gateway using a deployment credential.
     /// </summary>
     /// <param name="token">The repository-maintenance credential.</param>
     /// <param name="redactor">The shared diagnostic redactor.</param>
-    internal GitHubGateway(string token, Redactor redactor)
+    /// <param name="execute">An optional transport for isolated integration tests.</param>
+    internal GitHubGateway(string token, Redactor redactor,
+        Func<IReadOnlyList<string>, CancellationToken, string?, Task<CommandResult>>? execute = null)
     {
         _environment = new Dictionary<string, string?> { ["GH_TOKEN"] = token, ["GH_PROMPT_DISABLED"] = "1", ["GH_PAGER"] = "cat" };
         _redactor = redactor;
+        _execute = execute;
     }
 
     /// <summary>
@@ -120,19 +124,33 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     }
 
     /// <summary>
-    /// Updates one persistent daily report issue in the deployment repository.
+    /// Opens an issue for an actionable blocker or closes its managed issue after a verified merge.
     /// </summary>
-    /// <param name="repository">The deployment repository.</param>
-    /// <param name="body">The sanitized daily report.</param>
+    /// <param name="entry">The independently determined maintenance outcome.</param>
+    /// <param name="model">The configured model ID.</param>
+    /// <param name="destination">An optional explicit reporting repository override.</param>
     /// <param name="cancellationToken">Cancels publication.</param>
-    internal async Task PublishReportAsync(string repository, string body, CancellationToken cancellationToken)
+    internal async Task PublishAttentionAsync(ReportEntry entry, string model, string? destination, CancellationToken cancellationToken)
     {
-        const string title = "Depkeeper maintenance report";
+        if (entry.Outcome is not ("blocked" or "merged")) return;
+        var repository = destination ?? entry.Repository;
+        var identity = entry.Repository + (entry.Number > 0 ? "#" + entry.Number : string.Empty);
+        var title = "Depkeeper needs attention: " + identity;
+        var marker = $"<!-- depkeeper:{entry.Repository}:{entry.Number} -->";
         var result = await ExecuteAsync(["issue", "list", "--repo", repository, "--state", "open", "--search",
-            title + " in:title", "--json", "number,title", "--limit", "100"], cancellationToken);
+            title + " in:title", "--json", "number,title,body", "--limit", "100"], cancellationToken);
         RequireSuccess(result);
         using var document = JsonDocument.Parse(result.Output);
-        var issue = document.RootElement.EnumerateArray().FirstOrDefault(value => Text(value, "title") == title);
+        var issue = document.RootElement.EnumerateArray().FirstOrDefault(value => Text(value, "title") == title &&
+            Text(value, "body").Contains(marker, StringComparison.Ordinal));
+        if (entry.Outcome == "merged")
+        {
+            if (issue.ValueKind != JsonValueKind.Undefined)
+                RequireSuccess(await ExecuteAsync(["issue", "close", issue.GetProperty("number").GetRawText(),
+                    "--repo", repository, "--reason", "completed"], cancellationToken));
+            return;
+        }
+        var body = marker + "\n\n" + ReportWriter.Format([entry], model, false, _redactor);
         string[] arguments = issue.ValueKind == JsonValueKind.Undefined
             ? ["issue", "create", "--repo", repository, "--title", title, "--body-file", "-"]
             : ["issue", "edit", issue.GetProperty("number").GetInt32().ToString(CultureInfo.InvariantCulture),
@@ -182,9 +200,49 @@ internal sealed partial class GitHubGateway : IGitHubGateway
             cancellationToken);
         RequireSuccess(result);
         using var document = JsonDocument.Parse(result.Output);
-        return document.RootElement.EnumerateArray().Select(value => new DependencyChange(Text(value, "change_type"),
+        var values = document.RootElement.EnumerateArray().ToArray();
+        var changes = values.Select(value => new DependencyChange(Text(value, "change_type"),
             Text(value, "ecosystem"), Text(value, "name"), Text(value, "version"),
             value.GetProperty("vulnerabilities").EnumerateArray().Select(item => Text(item, "advisory_ghsa_id")).ToArray())).ToArray();
+        var locks = new Dictionary<string, string?>(StringComparer.Ordinal);
+        for (var index = 0; index < changes.Length; index++)
+        {
+            var change = changes[index];
+            var manifest = Text(values[index], "manifest");
+            if (change.ChangeType != "added" || change.Ecosystem != "npm" || NpmLockResolver.IsExact(change.Version) ||
+                Path.GetFileName(manifest) != "package.json") continue;
+            var directory = manifest.Contains('/') ? manifest[..(manifest.LastIndexOf('/') + 1)] : string.Empty;
+            while (true)
+            {
+                var lockPath = directory + "package-lock.json";
+                if (!locks.TryGetValue(lockPath, out var content))
+                {
+                    content = await ReadRepositoryFileAsync(pullRequest, lockPath, cancellationToken);
+                    locks[lockPath] = content;
+                }
+                if (content is not null)
+                {
+                    using var locked = JsonDocument.Parse(content);
+                    var version = NpmLockResolver.Resolve(locked.RootElement, manifest[directory.Length..], change.Name, change.Version);
+                    if (version is not null) changes[index] = change with { Version = version };
+                    break;
+                }
+                if (directory.Length == 0) break;
+                var parent = directory.TrimEnd('/');
+                directory = parent.Contains('/') ? parent[..(parent.LastIndexOf('/') + 1)] : string.Empty;
+            }
+        }
+        return changes;
+    }
+
+    private async Task<string?> ReadRepositoryFileAsync(PullRequestSnapshot pullRequest, string path, CancellationToken cancellationToken)
+    {
+        var result = await ExecuteAsync(["api", $"repos/{pullRequest.Repository}/contents/{Uri.EscapeDataString(path)}" +
+            "?ref=" + Uri.EscapeDataString(pullRequest.Head)], cancellationToken);
+        if (result.ExitCode != 0) return null;
+        using var document = JsonDocument.Parse(result.Output);
+        if (Text(document.RootElement, "encoding") != "base64") return null;
+        return Encoding.UTF8.GetString(Convert.FromBase64String(Text(document.RootElement, "content")));
     }
 
     /// <summary>
@@ -227,7 +285,9 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     }
 
     private Task<CommandResult> ExecuteAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken, string? input = null) =>
-        ProcessRunner.RunAsync("gh", arguments, environment: _environment, input: input, cancellationToken: cancellationToken);
+        _execute is null
+            ? ProcessRunner.RunAsync("gh", arguments, environment: _environment, input: input, cancellationToken: cancellationToken)
+            : _execute(arguments, cancellationToken, input);
 
     private static string Text(JsonElement value, string name, string fallback = "") =>
         value.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String ? property.GetString()! : fallback;

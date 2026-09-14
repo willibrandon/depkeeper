@@ -75,5 +75,7 @@ public sealed class ReleaseAgeGateTests(TestContext testContext)
         Assert.IsNull(await gate.GetBlockerAsync(pr, new ReleaseAgePolicy(), testContext.CancellationToken));
         Assert.IsNotNull(await gate.GetBlockerAsync(pr, new ReleaseAgePolicy(SecurityFixesBypass: false),
             testContext.CancellationToken));
+        changes.Add(new DependencyChange("added", "npm", "example", "2.0.0", ["GHSA-introduced"]));
+        Assert.IsNotNull(await gate.GetBlockerAsync(pr, new ReleaseAgePolicy(), testContext.CancellationToken));
     }
 }

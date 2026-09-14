@@ -25,6 +25,11 @@
 - Bound repairs and remember blocked heads to avoid repeating the same failed work daily.
 - Redact reports and avoid publishing raw transcripts or sensitive logs.
 - Keep the distinction between implemented functionality and planned behavior explicit.
+- Write Depkeeper PR descriptions as concise plain paragraphs with a restrained, subtly educational tone.
+- Do not use headers, lists, em dashes, stock AI phrasing, or elaborate formatting in Depkeeper PR descriptions.
+- Assign willibrandon whenever creating a PR in this repository.
+- Read the existing repository labels before adding one or two relevant labels to a PR.
+- When a new label is needed, create it with both a color and a description.
 
 ## Read-only references
 

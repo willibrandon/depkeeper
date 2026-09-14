@@ -59,4 +59,12 @@ internal static class MergePolicy
     internal static bool ChecksFinished(PullRequestSnapshot pullRequest) => pullRequest.Checks.Count > 0 &&
         pullRequest.Checks.All(check => check.State is "SUCCESS" or "NEUTRAL" or "SKIPPED" or "FAILURE" or "ERROR" or
             "TIMED_OUT" or "ACTION_REQUIRED" or "CANCELLED");
+
+    /// <summary>
+    /// Distinguishes unfinished CI and GitHub mergeability calculations from actionable blockers.
+    /// </summary>
+    /// <param name="pullRequest">The current pull request.</param>
+    /// <returns>Whether GitHub is still computing a result needed by the controller.</returns>
+    internal static bool IsPending(PullRequestSnapshot pullRequest) => !ChecksFinished(pullRequest) ||
+        pullRequest.Mergeable == "UNKNOWN" || pullRequest.MergeState == "UNKNOWN";
 }
