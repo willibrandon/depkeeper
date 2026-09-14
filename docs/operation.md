@@ -1,0 +1,44 @@
+# Operation
+
+The controller uses `gh` for GitHub operations and the Copilot SDK for repairs.
+The model can inspect and edit the checkout. Its shell tool runs in an isolated
+Docker container with read-only Git metadata and no forwarded host credentials.
+The controller performs the Git operations, scans changes, and makes merge decisions.
+
+Before pushing, Depkeeper reruns the original verification commands and scans the
+candidate with Picket. It refuses deleted files, symbolic-link escapes, security/CI
+configuration changes, and changes to npm scripts, identity, version, or engines.
+Those cases are reported for manual review rather than bypassing checks.
+
+Before merging, it refreshes the PR, checks the exact revision, reevaluates publication
+age, and lets GitHub enforce branch rules. Missing, pending, failed, or unexpectedly
+skipped required checks prevent merging. Explicitly configured advisory failures are
+reported. The bot does not create release tags.
+
+## Reports and recovery
+
+- `.state/state.json` checkpoints attempts before repair starts and after candidate pushes.
+- The workflow restores the latest retained checkpoint and uploads it even after failures.
+- `.state/report.md`, the Actions summary, and one deployment-repository issue show outcomes.
+- An unchanged blocked revision is not automatically attempted again. A new head or an
+  explicit `--retry-blocked` permits reconsideration.
+- Exit `0` means the sweep completed; `2` means it reported blockers; `1` means a run-level
+  failure. State and report artifacts remain available for inspection.
+
+The workflow serializes sweeps. Checkpoints are retained for 90 days. After a longer
+inactivity period, no retained checkpoint means a fresh attempt history.
+
+## Verification
+
+Unit tests cover merge gates, stale revisions, blocked-state persistence, cooldowns,
+toolchain detection, redaction, and workspace containment. Normal CI uses no model credits.
+
+Run the **Live repair smoke** workflow, or run locally:
+
+```sh
+dotnet run --project src/Depkeeper.Cli -- repair-smoke --model gpt-6-astra
+```
+
+This uses a real Copilot session on a disposable broken fixture, requires the original
+test to remain unchanged, and independently verifies the repaired code. It makes no
+GitHub repository changes.

@@ -21,8 +21,12 @@ jobs:
           dotnet-version: 10.0.x
       - run: dotnet restore
       - run: dotnet format --verify-no-changes --no-restore
-      - run: dotnet format whitespace --folder --include scripts/setup-auth.cs --verify-no-changes
+      - run: >-
+          dotnet format whitespace --folder --include scripts/setup-auth.cs scripts/restore-state.cs scripts/run-maintenance.cs
+          --verify-no-changes
       - run: dotnet build --configuration Release --no-restore
       - run: dotnet test --solution Depkeeper.slnx --configuration Release --no-build
       - run: dotnet run --project src/Depkeeper.Cli --configuration Release --no-build -- --help
       - run: dotnet run --file scripts/setup-auth.cs -- --help
+      - run: dotnet build scripts/restore-state.cs --configuration Release
+      - run: dotnet build scripts/run-maintenance.cs --configuration Release

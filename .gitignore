@@ -487,6 +487,7 @@ $RECYCLE.BIN/
 !.env.example
 .state/
 runs/
+reports/
 *.pem
 *.key
 auth.json

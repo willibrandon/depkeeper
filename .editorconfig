@@ -61,3 +61,4 @@ csharp_style_deconstructed_variable_declaration = true:error
 dotnet_diagnostic.IDE0042.severity = error
 dotnet_diagnostic.MSTEST0049.severity = error
 dotnet_diagnostic.MSTEST0046.severity = error
+dotnet_diagnostic.MSTEST0037.severity = error

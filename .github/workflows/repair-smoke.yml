@@ -1,0 +1,25 @@
+name: Live repair smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet build --configuration Release
+      - name: Exercise actual Copilot repair on a disposable fixture
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          DEPKEEPER_MODEL: ${{ vars.DEPKEEPER_MODEL }}
+        run: dotnet run --project src/Depkeeper.Cli --configuration Release --no-build -- repair-smoke
