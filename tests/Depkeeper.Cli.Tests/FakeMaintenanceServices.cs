@@ -91,6 +91,26 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     internal Func<RecoveryRequest, RepairResult>? OnRecovery { get; set; }
 
     /// <summary>
+    /// Gets unresolved inline review feedback returned by the fake gateway.
+    /// </summary>
+    internal List<ReviewThread> ReviewThreads { get; } = [];
+
+    /// <summary>
+    /// Gets or sets review feedback returned for a particular server read.
+    /// </summary>
+    internal Func<int, IReadOnlyList<ReviewThread>>? OnReviewThreads { get; set; }
+
+    /// <summary>
+    /// Gets the number of review-thread refreshes.
+    /// </summary>
+    internal int ReviewReads { get; private set; }
+
+    /// <summary>
+    /// Gets the review threads resolved by the controller.
+    /// </summary>
+    internal List<string> ResolvedThreads { get; } = [];
+
+    /// <summary>
     /// Gets or sets the first CI results on a newly created recovery PR.
     /// </summary>
     internal IReadOnlyList<CheckSnapshot>? RecoveryChecks { get; set; }
@@ -114,6 +134,21 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
 
     Task<string> IGitHubGateway.GetFailureLogsAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken) =>
         Task.FromResult("Synthetic test failure.");
+
+    Task<IReadOnlyList<ReviewThread>> IGitHubGateway.GetReviewThreadsAsync(PullRequestSnapshot pullRequest,
+        CancellationToken cancellationToken)
+    {
+        ReviewReads++;
+        return Task.FromResult(OnReviewThreads?.Invoke(ReviewReads) ?? ReviewThreads.ToArray());
+    }
+
+    Task IGitHubGateway.ResolveReviewThreadsAsync(PullRequestSnapshot pullRequest, IReadOnlyList<string> threadIds,
+        CancellationToken cancellationToken)
+    {
+        ResolvedThreads.AddRange(threadIds);
+        ReviewThreads.RemoveAll(thread => threadIds.Contains(thread.Id, StringComparer.Ordinal));
+        return Task.CompletedTask;
+    }
 
     Task<bool> IGitHubGateway.UpdateBranchAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken) =>
         Task.FromResult(false);

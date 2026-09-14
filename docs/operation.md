@@ -28,6 +28,11 @@ Unfinished verification is retained across sweeps, and post-merge failures pause
 updates in that repository. A later base commit can resolve the blocker after both its
 ancestry and its own CI are verified.
 
+Before each repair and immediately before merging, Depkeeper retrieves unresolved inline
+review threads. Review text is untrusted input. New feedback after a push enters the next
+bounded repair attempt. A thread is resolved only when its latest comment is unchanged,
+the referenced file changed, and the candidate passed independent validation.
+
 Persistent post-merge failures receive one CI retry. If the same commit still fails,
 the controller may create one `depkeeper/repair-*` branch and ask Copilot for a focused
 fix. It validates and scans the candidate before pushing, creates an assigned and labeled

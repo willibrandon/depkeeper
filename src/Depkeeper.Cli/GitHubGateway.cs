@@ -94,6 +94,91 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     }
 
     /// <summary>
+    /// Retrieves unresolved inline review conversations through GitHub's review-thread API.
+    /// </summary>
+    /// <param name="pullRequest">The PR to inspect.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>The bounded unresolved threads.</returns>
+    public async Task<IReadOnlyList<ReviewThread>> GetReviewThreadsAsync(PullRequestSnapshot pullRequest,
+        CancellationToken cancellationToken)
+    {
+        var (owner, name) = SplitRepository(pullRequest.Repository);
+        const string query = """
+            query($owner:String!,$name:String!,$number:Int!,$endCursor:String) {
+              repository(owner:$owner,name:$name) {
+                pullRequest(number:$number) {
+                  reviewThreads(first:100,after:$endCursor) {
+                    nodes {
+                      id isResolved path line
+                      comments(last:100) {
+                        nodes { id body url author { login } }
+                        pageInfo { hasPreviousPage }
+                      }
+                    }
+                    pageInfo { hasNextPage endCursor }
+                  }
+                }
+              }
+            }
+            """;
+        var result = await ExecuteAsync(["api", "graphql", "--paginate", "--slurp", "-f", "query=" + query,
+            "-f", "owner=" + owner, "-f", "name=" + name, "-F", "number=" + Number(pullRequest)], cancellationToken);
+        RequireSuccess(result);
+        using var document = JsonDocument.Parse(result.Output);
+        var threads = new List<ReviewThread>();
+        foreach (var reviewThreads in document.RootElement.EnumerateArray().Select(page =>
+            page.GetProperty("data").GetProperty("repository").GetProperty("pullRequest").GetProperty("reviewThreads")))
+        {
+            foreach (var thread in reviewThreads.GetProperty("nodes").EnumerateArray()
+                .Where(thread => !thread.GetProperty("isResolved").GetBoolean()))
+            {
+                var comments = thread.GetProperty("comments");
+                if (comments.GetProperty("pageInfo").GetProperty("hasPreviousPage").GetBoolean())
+                    throw new IOException("A review thread has more than 100 comments and requires manual triage.");
+                var messages = comments.GetProperty("nodes").EnumerateArray().ToArray();
+                if (messages.Length == 0) continue;
+                var conversation = string.Join("\n", messages.Select(comment =>
+                    (comment.TryGetProperty("author", out var author) && author.ValueKind == JsonValueKind.Object
+                        ? Text(author, "login", "unknown") : "unknown") + ": " + Text(comment, "body")));
+                if (conversation.Length > 8000) conversation = conversation[^8000..];
+                var latest = messages[^1];
+                threads.Add(new ReviewThread(Text(thread, "id"), Text(thread, "path"),
+                    thread.TryGetProperty("line", out var line) && line.ValueKind == JsonValueKind.Number ? line.GetInt32() : null,
+                    Text(latest, "id"), conversation, Text(latest, "url")));
+            }
+        }
+        return threads;
+    }
+
+    /// <summary>
+    /// Resolves unchanged review threads after the controller confirms the exact repaired revision.
+    /// </summary>
+    /// <param name="pullRequest">The exact repaired revision.</param>
+    /// <param name="threadIds">The addressed thread identifiers.</param>
+    /// <param name="cancellationToken">Cancels mutations.</param>
+    public async Task ResolveReviewThreadsAsync(PullRequestSnapshot pullRequest, IReadOnlyList<string> threadIds,
+        CancellationToken cancellationToken)
+    {
+        var current = await RefreshAsync(pullRequest, cancellationToken);
+        if (current.Head != pullRequest.Head) throw new IOException("The PR changed before review threads could be resolved.");
+        const string mutation = """
+            mutation($threadId:ID!) {
+              resolveReviewThread(input:{threadId:$threadId}) { thread { id isResolved } }
+            }
+            """;
+        foreach (var id in threadIds.Distinct(StringComparer.Ordinal))
+        {
+            var result = await ExecuteAsync(["api", "graphql", "-f", "query=" + mutation, "-f", "threadId=" + id],
+                cancellationToken);
+            RequireSuccess(result);
+            using var document = JsonDocument.Parse(result.Output);
+            var thread = document.RootElement.GetProperty("data").GetProperty("resolveReviewThread").GetProperty("thread");
+            if (Text(thread, "id") != id || !thread.GetProperty("isResolved").GetBoolean())
+                throw new IOException("GitHub did not confirm review thread resolution.");
+        }
+    }
+
+    /// <summary>
     /// Requests a merge-from-base update against an exact source revision.
     /// </summary>
     /// <param name="pullRequest">The expected revision.</param>
@@ -494,6 +579,12 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         value.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String ? property.GetString()! : fallback;
 
     private static string Number(PullRequestSnapshot pullRequest) => pullRequest.Number.ToString(CultureInfo.InvariantCulture);
+
+    private static (string Owner, string Name) SplitRepository(string repository)
+    {
+        var separator = repository.IndexOf('/');
+        return (repository[..separator], repository[(separator + 1)..]);
+    }
 
     private static void RequireSuccess(CommandResult result)
     {
