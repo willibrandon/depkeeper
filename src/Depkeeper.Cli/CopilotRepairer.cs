@@ -65,7 +65,8 @@ internal sealed class CopilotRepairer : IRepairer
             var install = toolchain.Install;
             var verify = toolchain.Verify;
             var image = toolchain.Name == "node" && profile.Image == "auto"
-                ? await NodeImageBuilder.BuildAsync(toolchain.Image, cancellationToken) : toolchain.Image;
+                ? await NodeImageBuilder.BuildAsync(toolchain.Image, File.Exists(Path.Combine(directory, "Cargo.toml")), cancellationToken)
+                : toolchain.Image;
             using var container = new ContainerRunner(directory, image, _redactor);
             var setup = await container.RunAsync(string.Join(" && ", install), cancellationToken);
             var initialDiagnostics = setup.ExitCode == 0 ? string.Empty :
