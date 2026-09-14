@@ -19,7 +19,10 @@ reported. The bot does not create release tags.
 
 - `.state/state.json` checkpoints attempts before repair starts and after candidate pushes.
 - The workflow restores the latest retained checkpoint and uploads it even after failures.
-- `.state/report.md`, the Actions summary, and one deployment-repository issue show outcomes.
+- `.state/report.md` and the Actions summary show every outcome.
+- Actionable blockers open or update a managed issue in the affected repository. Successful
+  merges close the corresponding managed issue. Pending CI and cooldowns do not open issues.
+  `--report-repo OWNER/REPO` explicitly selects a central destination instead.
 - An unchanged blocked revision is not automatically attempted again. A new head or an
   explicit `--retry-blocked` permits reconsideration.
 - Exit `0` means the sweep completed; `2` means it reported blockers; `1` means a run-level

@@ -101,9 +101,10 @@ internal sealed class MaintenanceRunner
                         if (settings.DryRun)
                         {
                             var blocker = MergePolicy.GetBlocker(current, current.Head, profile);
+                            var outcome = blocker is null ? "would-merge" : MergePolicy.HasFailure(current, profile) ? "would-repair" :
+                                MergePolicy.ChecksFinished(current) ? "blocked" : "pending";
                             results.Add(new ReportEntry(repository, current.Number,
-                                blocker is null ? "would-merge" : MergePolicy.HasFailure(current, profile) ? "would-repair" : "blocked",
-                                blocker ?? "All observed merge gates pass."));
+                                outcome, blocker ?? "All observed merge gates pass."));
                             continue;
                         }
 

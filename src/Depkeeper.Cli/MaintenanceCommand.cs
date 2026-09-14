@@ -33,7 +33,7 @@ internal static class MaintenanceCommand
         var report = new Option<string>("--report") { DefaultValueFactory = _ => ".state/report.md" };
         var reportRepository = new Option<string?>("--report-repo")
         {
-            Description = "Repository receiving the report issue (default: GITHUB_REPOSITORY in Actions)."
+            Description = "Optional repository for actionable-blocker issues (default: each affected repository)."
         };
         Option[] options = [config, repositories, model, dryRun, retry, repairs, attempts,
             repairMinutes, ciMinutes, pr, state, report, reportRepository, releaseAge, unknownAge, securityAge];
@@ -71,12 +71,13 @@ internal static class MaintenanceCommand
                 await File.WriteAllTextAsync(reportPath, markdown, cancellationToken);
                 var summaryPath = Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
                 if (!string.IsNullOrWhiteSpace(summaryPath)) await File.AppendAllTextAsync(summaryPath, markdown, cancellationToken);
-                var destination = result.GetValue(reportRepository) ?? Environment.GetEnvironmentVariable("GITHUB_REPOSITORY");
-                if (!settings.DryRun && !string.IsNullOrWhiteSpace(destination))
+                var destination = result.GetValue(reportRepository);
+                if (!settings.DryRun)
                 {
-                    if (!RunSettings.IsRepository(destination))
+                    if (destination is not null && !RunSettings.IsRepository(destination))
                         throw new InvalidDataException("Report repository must use OWNER/REPO format.");
-                    await gateway.PublishReportAsync(destination, markdown, cancellationToken);
+                    foreach (var entry in entries)
+                        await gateway.PublishAttentionAsync(entry, settings.Model, destination, cancellationToken);
                 }
                 await output.WriteLineAsync(string.Join("; ", entries.GroupBy(entry => entry.Outcome)
                     .Select(group => $"{group.Key}: {group.Count()}")));
