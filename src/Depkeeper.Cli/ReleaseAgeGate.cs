@@ -70,7 +70,8 @@ internal sealed class ReleaseAgeGate : IReleaseAgeGate
             }
             return null;
         }
-        catch (Exception exception) when (exception is IOException or HttpRequestException or System.Text.Json.JsonException)
+        catch (Exception exception) when (exception is IOException or HttpRequestException or System.Text.Json.JsonException or
+            System.Xml.XmlException)
         {
             return policy.AllowUnknown ? null :
                 "Dependency publication lookup failed; automatic merging is held until metadata is available.";
