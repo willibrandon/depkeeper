@@ -18,7 +18,9 @@ See [the example](../examples/depkeeper.json). CLI selections override repositor
 defaults; Actions variables override the file's repository/model defaults.
 
 Profiles can supply `image`, `install`, `verify`, `requiredChecks`, `postMergeChecks`, `advisoryChecks`,
-and `releaseAge`. Explicit image and command overrides take precedence over detection.
+`maximumCheckAgeHours`, `autoRecover`, `recoveryAssignee`, and `releaseAge`. Explicit image and command overrides
+take precedence over detection. Successful GitHub Actions checks older than one hour are rerun by default before merge.
+Set `maximumCheckAgeHours` to zero to disable that freshness gate.
 Commands use the image's POSIX shell and PATH. Exact Node engine versions and npm
 `packageManager` declarations are honored; other version ranges use the default image.
 Detected Node images include controller-installed CMake, Ninja, and pkg-config for
@@ -75,3 +77,8 @@ Use `run --help` for all options. Defaults are two attempts per lineage, 30 minu
 per repair, and 15 minutes waiting for CI. A sweep updates at most one PR per repository,
 and rotates repair priority so a busy repository cannot monopolize the daily budget.
 Use `--retry-blocked` for an explicit retry after correcting a blocker.
+
+Persistent post-merge failures first receive one exact-commit CI retry. If that still
+fails and `autoRecover` is enabled, Depkeeper asks Copilot for a focused repair, runs
+the configured validation and Picket, and opens one recovery PR assigned to
+`recoveryAssignee`. The recovery uses the normal attempt and daily repair budgets.

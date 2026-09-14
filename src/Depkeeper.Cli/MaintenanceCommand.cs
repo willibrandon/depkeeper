@@ -62,7 +62,8 @@ internal static class MaintenanceCommand
                 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20), MaxResponseContentBufferSize = 8 * 1024 * 1024 };
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("Depkeeper/0.1");
                 var publications = new PublicationClient(http, gateway.GetActionPublicationAsync);
-                var ageGate = new ReleaseAgeGate(gateway.GetDependencyChangesAsync, publications.GetAsync);
+                var ageGate = new ReleaseAgeGate(gateway.GetDependencyChangesAsync, publications.GetAsync,
+                    codeOnly: gateway.IsCodeOnlyRecoveryAsync);
                 var controller = new MaintenanceRunner(gateway, repairer, store, redactor, ageGate);
                 var entries = await controller.RunAsync(settings, cancellationToken);
                 var markdown = ReportWriter.Format(entries, settings.Model, settings.DryRun, redactor);

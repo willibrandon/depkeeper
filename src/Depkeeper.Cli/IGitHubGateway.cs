@@ -65,6 +65,45 @@ internal interface IGitHubGateway
     Task<string?> GetBranchDescendantAsync(string repository, string branch, string ancestor, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Resolves a branch to its current exact commit.
+    /// </summary>
+    /// <param name="repository">The selected repository.</param>
+    /// <param name="branch">The branch name.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>The current branch commit.</returns>
+    Task<string> GetBranchHeadAsync(string repository, string branch, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Requests a bounded refresh of the GitHub workflow runs represented by the supplied checks.
+    /// </summary>
+    /// <param name="repository">The selected repository.</param>
+    /// <param name="commit">The exact revision those workflow runs must verify.</param>
+    /// <param name="checks">The check evidence identifying the exact workflow runs.</param>
+    /// <param name="failedOnly">Whether only failed jobs should be rerun.</param>
+    /// <param name="cancellationToken">Cancels refresh requests.</param>
+    /// <returns>Whether at least one workflow was successfully requested.</returns>
+    Task<bool> RerunChecksAsync(string repository, string commit, IReadOnlyList<CheckSnapshot> checks, bool failedOnly,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Finds an existing recovery PR while verifying its branch, base, and authenticated author.
+    /// </summary>
+    /// <param name="request">The expected recovery identity.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>The verified recovery PR, or null.</returns>
+    Task<PullRequestSnapshot?> FindRecoveryAsync(RecoveryRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Creates or resumes a recovery PR for an independently validated branch.
+    /// </summary>
+    /// <param name="request">The recovery branch and source PR.</param>
+    /// <param name="profile">The trusted PR assignment policy.</param>
+    /// <param name="cancellationToken">Cancels creation.</param>
+    /// <returns>The created or existing recovery PR.</returns>
+    Task<PullRequestSnapshot> CreateRecoveryPullRequestAsync(RecoveryRequest request, RepositoryProfile profile,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Publishes an actionable outcome on a pull request.
     /// </summary>
     /// <param name="pullRequest">The target pull request.</param>

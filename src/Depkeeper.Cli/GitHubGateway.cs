@@ -11,10 +11,11 @@ namespace Depkeeper.Cli;
 internal sealed partial class GitHubGateway : IGitHubGateway
 {
     private const string Fields = "number,title,author,headRefName,headRefOid,baseRefName,isDraft,isCrossRepository," +
-        "mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,state";
+        "mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,state,mergeCommit";
     private readonly Dictionary<string, string?> _environment;
     private readonly Redactor _redactor;
     private readonly Func<IReadOnlyList<string>, CancellationToken, string?, Task<CommandResult>>? _execute;
+    private string? _actor;
 
     /// <summary>
     /// Creates a GitHub gateway using a deployment credential.
@@ -58,7 +59,12 @@ internal sealed partial class GitHubGateway : IGitHubGateway
             ["pr", "view", Number(pullRequest), "--repo", pullRequest.Repository, "--json", Fields], cancellationToken);
         RequireSuccess(result);
         using var document = JsonDocument.Parse(result.Output);
-        return Parse(pullRequest.Repository, document.RootElement);
+        var current = Parse(pullRequest.Repository, document.RootElement);
+        return current with
+        {
+            ManagedRecovery = pullRequest.ManagedRecovery && current.Author == pullRequest.Author &&
+                current.Branch == pullRequest.Branch && current.BaseBranch == pullRequest.BaseBranch && !current.CrossRepository
+        };
     }
 
     /// <summary>
@@ -170,15 +176,122 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     public async Task<string?> GetBranchDescendantAsync(string repository, string branch, string ancestor,
         CancellationToken cancellationToken)
     {
-        var result = await ExecuteAsync(["api", $"repos/{repository}/commits/{Uri.EscapeDataString(branch)}", "--jq", ".sha"],
-            cancellationToken);
-        RequireSuccess(result);
-        var head = result.Output.Trim();
-        if (head == ancestor || head.Length != 40 || !head.All(char.IsAsciiHexDigit)) return null;
+        var head = await GetBranchHeadAsync(repository, branch, cancellationToken);
+        if (head == ancestor) return null;
         var comparison = await ExecuteAsync(["api", $"repos/{repository}/compare/{Uri.EscapeDataString(ancestor)}...{head}",
             "--jq", ".status"], cancellationToken);
         RequireSuccess(comparison);
         return comparison.Output.Trim() == "ahead" ? head : null;
+    }
+
+    /// <summary>
+    /// Resolves a branch to a full GitHub commit identifier.
+    /// </summary>
+    /// <param name="repository">The selected repository.</param>
+    /// <param name="branch">The branch to resolve.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>The exact branch head.</returns>
+    public async Task<string> GetBranchHeadAsync(string repository, string branch, CancellationToken cancellationToken)
+    {
+        var result = await ExecuteAsync(["api", $"repos/{repository}/commits/{Uri.EscapeDataString(branch)}", "--jq", ".sha"],
+            cancellationToken);
+        RequireSuccess(result);
+        var head = result.Output.Trim();
+        if (head.Length != 40 || !head.All(char.IsAsciiHexDigit)) throw new IOException("GitHub returned an invalid branch head.");
+        return head;
+    }
+
+    /// <summary>
+    /// Reruns workflows associated with the inspected commit without changing repository files.
+    /// </summary>
+    /// <param name="repository">The selected repository.</param>
+    /// <param name="commit">The exact revision to verify.</param>
+    /// <param name="checks">The inspected checks.</param>
+    /// <param name="failedOnly">Whether only failed jobs should be retried.</param>
+    /// <param name="cancellationToken">Cancels requests.</param>
+    /// <returns>Whether the requested workflow refreshes succeeded.</returns>
+    public async Task<bool> RerunChecksAsync(string repository, string commit, IReadOnlyList<CheckSnapshot> checks, bool failedOnly,
+        CancellationToken cancellationToken)
+    {
+        var runs = checks.Where(check => (!failedOnly || check.Failed) && Uri.TryCreate(check.Url, UriKind.Absolute, out var url) &&
+            url.Scheme == "https" && url.Host == "github.com" &&
+            url.AbsolutePath.StartsWith("/" + repository + "/actions/runs/", StringComparison.OrdinalIgnoreCase))
+            .Select(check => RunUrl().Match(check.Url))
+            .Where(match => match.Success).Select(match => match.Groups[1].Value).Distinct(StringComparer.Ordinal).ToArray();
+        foreach (var run in runs)
+        {
+            var metadata = await ExecuteAsync(["run", "view", run, "--repo", repository, "--json", "headSha", "--jq", ".headSha"],
+                cancellationToken);
+            if (metadata.ExitCode != 0 || metadata.Output.Trim() != commit) return false;
+            string[] options = failedOnly ? ["--failed"] : [];
+            var result = await ExecuteAsync(["run", "rerun", run, "--repo", repository, .. options], cancellationToken);
+            if (result.ExitCode != 0) return false;
+        }
+        return runs.Length > 0;
+    }
+
+    /// <summary>
+    /// Adopts only the authenticated account's PR on the exact recovery branch and base.
+    /// </summary>
+    /// <param name="request">The expected recovery identity.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>The existing managed recovery, or null.</returns>
+    public async Task<PullRequestSnapshot?> FindRecoveryAsync(RecoveryRequest request, CancellationToken cancellationToken)
+    {
+        var result = await ExecuteAsync(["pr", "list", "--repo", request.Repository, "--head", request.Branch,
+            "--state", "all", "--limit", "100", "--json", Fields], cancellationToken);
+        RequireSuccess(result);
+        using var document = JsonDocument.Parse(result.Output);
+        var matches = document.RootElement.EnumerateArray().ToArray();
+        if (matches.Length == 0) return null;
+        if (matches.Length != 1) throw new IOException("Multiple PRs use the recovery branch; manual review is required.");
+        if (_actor is null)
+        {
+            var actor = await ExecuteAsync(["api", "user", "--jq", ".login"], cancellationToken);
+            RequireSuccess(actor);
+            _actor = actor.Output.Trim();
+            if (string.IsNullOrWhiteSpace(_actor)) throw new IOException("The authenticated GitHub account could not be identified.");
+        }
+        var pullRequest = Parse(request.Repository, matches[0]);
+        if (pullRequest.Author != _actor || pullRequest.Branch != request.Branch ||
+            pullRequest.BaseBranch != request.BaseBranch || pullRequest.CrossRepository)
+            throw new IOException("The recovery PR has an unexpected author, branch, or base.");
+        return pullRequest with { ManagedRecovery = true };
+    }
+
+    /// <summary>
+    /// Publishes one concise, assigned, labeled recovery PR and resumes it on repeated calls.
+    /// </summary>
+    /// <param name="request">The validated recovery branch.</param>
+    /// <param name="profile">The trusted assignment policy.</param>
+    /// <param name="cancellationToken">Cancels publication.</param>
+    /// <returns>The confirmed recovery PR.</returns>
+    public async Task<PullRequestSnapshot> CreateRecoveryPullRequestAsync(RecoveryRequest request, RepositoryProfile profile,
+        CancellationToken cancellationToken)
+    {
+        var existing = await FindRecoveryAsync(request, cancellationToken);
+        if (existing is not null) return existing;
+        var labels = await ExecuteAsync(["label", "list", "--repo", request.Repository, "--limit", "1000", "--json", "name"],
+            cancellationToken);
+        RequireSuccess(labels);
+        using var document = JsonDocument.Parse(labels.Output);
+        var label = document.RootElement.EnumerateArray().Select(value => Text(value, "name"))
+            .FirstOrDefault(name => name.Equals("bug", StringComparison.OrdinalIgnoreCase));
+        if (label is null)
+        {
+            RequireSuccess(await ExecuteAsync(["label", "create", "bug", "--repo", request.Repository,
+                "--color", "d73a4a", "--description", "Something isn't working"], cancellationToken));
+            label = "bug";
+        }
+        var body = $"Repair the CI failures after dependency update #{request.SourcePullRequest}. " +
+            "The changes passed the configured local verification and Picket scan.";
+        var result = await ExecuteAsync(["pr", "create", "--repo", request.Repository, "--base", request.BaseBranch,
+            "--head", request.Branch, "--title", $"Fix CI after #{request.SourcePullRequest}", "--body", body,
+            "--assignee", profile.RecoveryAssignee, "--label", label], cancellationToken);
+        var created = await FindRecoveryAsync(request, cancellationToken);
+        if (created is not null) return created;
+        RequireSuccess(result);
+        throw new IOException("The recovery PR could not be confirmed after creation.");
     }
 
     /// <summary>
@@ -245,7 +358,9 @@ internal sealed partial class GitHubGateway : IGitHubGateway
                 var status = Text(check, "status");
                 checks.Add(new CheckSnapshot(Text(check, "name", Text(check, "context")),
                     status.Length == 0 ? Text(check, "state") : status == "COMPLETED" ? Text(check, "conclusion") : status,
-                    Text(check, "detailsUrl", Text(check, "targetUrl"))));
+                    Text(check, "detailsUrl", Text(check, "targetUrl")),
+                    DateTimeOffset.TryParse(Text(check, "completedAt", Text(check, "createdAt")), CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out var completed) ? completed : null));
             }
         }
         return new PullRequestSnapshot(repository, value.GetProperty("number").GetInt32(), Text(value, "title"),
@@ -254,7 +369,8 @@ internal sealed partial class GitHubGateway : IGitHubGateway
             Text(value, "headRefName"), Text(value, "headRefOid"), Text(value, "baseRefName"),
             value.GetProperty("isDraft").GetBoolean(), value.GetProperty("isCrossRepository").GetBoolean(),
             Text(value, "mergeable"), Text(value, "mergeStateStatus"), Text(value, "reviewDecision"), checks,
-            Text(value, "state", "OPEN"));
+            Text(value, "state", "OPEN"), value.TryGetProperty("mergeCommit", out var merged) &&
+                merged.ValueKind == JsonValueKind.Object ? Text(merged, "oid") : null);
     }
 
     /// <summary>
@@ -304,6 +420,23 @@ internal sealed partial class GitHubGateway : IGitHubGateway
             }
         }
         return changes;
+    }
+
+    /// <summary>
+    /// Confirms that a managed recovery with an empty dependency diff contains only complete code-only patches.
+    /// </summary>
+    /// <param name="pullRequest">The verified controller-owned PR.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>Whether publication-age policy has no dependency versions to evaluate.</returns>
+    internal async Task<bool> IsCodeOnlyRecoveryAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken)
+    {
+        if (!pullRequest.ManagedRecovery) return false;
+        var result = await ExecuteAsync(["api", $"repos/{pullRequest.Repository}/pulls/{Number(pullRequest)}/files?per_page=100",
+            "--paginate", "--slurp"], cancellationToken);
+        RequireSuccess(result);
+        using var document = JsonDocument.Parse(result.Output);
+        var files = document.RootElement.EnumerateArray().SelectMany(page => page.EnumerateArray()).ToArray();
+        return files.Length is > 0 and <= 30 && files.All(DependencyEditPolicy.IsCodeOnly);
     }
 
     private async Task<string?> ReadRepositoryFileAsync(PullRequestSnapshot pullRequest, string path, CancellationToken cancellationToken)

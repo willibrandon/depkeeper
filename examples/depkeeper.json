@@ -11,7 +11,11 @@
       "image": "node:24-trixie",
       "install": ["npm ci"],
       "verify": ["npm test", "npm run build"],
-      "requiredChecks": ["CI"],
+      "requiredChecks": ["Quality and bundles"],
+      "postMergeChecks": ["Quality and bundles"],
+      "maximumCheckAgeHours": 1,
+      "autoRecover": true,
+      "recoveryAssignee": "@me",
       "advisoryChecks": []
     }
   }

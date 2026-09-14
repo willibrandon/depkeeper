@@ -40,8 +40,31 @@ internal sealed class CopilotRepairer : IRepairer
     /// <param name="profile">Trusted validation configuration.</param>
     /// <param name="cancellationToken">Cancels all repair operations.</param>
     /// <returns>The pushed revision and diagnostic summary.</returns>
-    public async Task<RepairResult> RepairAsync(PullRequestSnapshot pullRequest, string logs, RepositoryProfile profile,
+    public Task<RepairResult> RepairAsync(PullRequestSnapshot pullRequest, string logs, RepositoryProfile profile,
+        CancellationToken cancellationToken) => RepairCoreAsync(pullRequest, logs, profile, false, cancellationToken);
+
+    /// <summary>
+    /// Builds a verified follow-up fix in a separate recovery branch.
+    /// </summary>
+    /// <param name="request">The exact base revision and controlled destination branch.</param>
+    /// <param name="logs">The post-merge failure evidence.</param>
+    /// <param name="profile">Trusted verification settings.</param>
+    /// <param name="cancellationToken">Cancels the repair.</param>
+    /// <returns>The independently verified repair commit.</returns>
+    public Task<RepairResult> CreateRecoveryAsync(RecoveryRequest request, string logs, RepositoryProfile profile,
         CancellationToken cancellationToken)
+    {
+        var target = PullRequestSnapshot.Lookup(request.Repository, request.SourcePullRequest) with
+        {
+            Head = request.BaseHead,
+            BaseBranch = request.BaseBranch,
+            Branch = request.Branch
+        };
+        return RepairCoreAsync(target, logs, profile, true, cancellationToken);
+    }
+
+    private async Task<RepairResult> RepairCoreAsync(PullRequestSnapshot pullRequest, string logs, RepositoryProfile profile,
+        bool newBranch, CancellationToken cancellationToken)
     {
         var temporary = Directory.CreateTempSubdirectory("depkeeper-").FullName;
         var directory = Path.Join(temporary, "checkout");
@@ -121,9 +144,18 @@ internal sealed class CopilotRepairer : IRepairer
                     throw new InvalidOperationException("Verification modified package scripts or identity; the candidate was not pushed.");
             }
             await ScanFilesAsync(directory, stagedPaths, cancellationToken);
-            var current = await _github.RefreshAsync(pullRequest, cancellationToken);
-            if (current.Head != pullRequest.Head || !MergePolicy.IsEligible(current))
-                throw new InvalidOperationException("The PR changed while Copilot worked; no repair was pushed.");
+            if (newBranch)
+            {
+                var current = await _github.GetBranchHeadAsync(pullRequest.Repository, pullRequest.BaseBranch, cancellationToken);
+                if (current != pullRequest.Head)
+                    throw new InvalidOperationException("The base branch changed during recovery; the candidate was not pushed.");
+            }
+            else
+            {
+                var current = await _github.RefreshAsync(pullRequest, cancellationToken);
+                if (current.Head != pullRequest.Head || !MergePolicy.IsEligible(current))
+                    throw new InvalidOperationException("The PR changed while Copilot worked; no repair was pushed.");
+            }
             Require(await GitAsync(directory,
                 ["-c", "user.name=Depkeeper", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
                 "commit", "-m", $"fix(deps): repair CI for #{pullRequest.Number}"], cancellationToken));

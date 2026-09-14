@@ -15,4 +15,15 @@ internal interface IRepairer
     /// <returns>The verified candidate revision.</returns>
     Task<RepairResult> RepairAsync(PullRequestSnapshot pullRequest, string logs, RepositoryProfile profile,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Repairs the failing base in a new branch after independent verification and scanning.
+    /// </summary>
+    /// <param name="request">The exact base revision and recovery branch.</param>
+    /// <param name="logs">The post-merge failure evidence.</param>
+    /// <param name="profile">Trusted verification settings.</param>
+    /// <param name="cancellationToken">Cancels the repair.</param>
+    /// <returns>The validated and published candidate.</returns>
+    Task<RepairResult> CreateRecoveryAsync(RecoveryRequest request, string logs, RepositoryProfile profile,
+        CancellationToken cancellationToken);
 }

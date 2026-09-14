@@ -8,6 +8,27 @@ namespace Depkeeper.Cli.Tests;
 public sealed class ReleaseAgeGateTests(TestContext testContext)
 {
     /// <summary>
+    /// Permits empty dependency diffs only for independently confirmed code-only managed recovery PRs.
+    /// </summary>
+    /// <param name="managed">Whether the controller verified recovery ownership.</param>
+    /// <param name="codeOnly">Whether the changed files establish a code-only repair.</param>
+    /// <param name="held">Whether metadata policy must hold the PR.</param>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    [DataRow(true, true, false)]
+    [DataRow(true, false, true)]
+    [DataRow(false, true, true)]
+    public async Task EmptyDiffRequiresVerifiedCodeOnlyRecovery(bool managed, bool codeOnly, bool held)
+    {
+        var gate = new ReleaseAgeGate((_, _) => Task.FromResult<IReadOnlyList<DependencyChange>>([]),
+            (_, _) => throw new InvalidOperationException("Unexpected registry lookup."),
+            codeOnly: (_, _) => Task.FromResult(codeOnly));
+        var result = await gate.GetBlockerAsync(TestData.PullRequest() with { ManagedRecovery = managed },
+            new ReleaseAgePolicy(), testContext.CancellationToken);
+        Assert.AreEqual(held, result is not null);
+    }
+
+    /// <summary>
     /// Contains metadata service failures while propagating cancellation from the caller.
     /// </summary>
     /// <returns>The test task.</returns>
