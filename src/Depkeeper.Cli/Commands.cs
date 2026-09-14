@@ -37,20 +37,9 @@ internal static class Commands
     private static async Task<int> ListModelsAsync(TextWriter output, TextWriter error,
         Func<string?> getCopilotToken, CancellationToken cancellationToken)
     {
-        var token = getCopilotToken();
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            await error.WriteLineAsync("Set COPILOT_GITHUB_TOKEN to a token with Copilot Requests access.");
-            return 1;
-        }
-
         try
         {
-            await using var client = new CopilotClient(new CopilotClientOptions
-            {
-                GitHubToken = token,
-                UseLoggedInUser = false
-            });
+            await using var client = new CopilotClient(CopilotAuthentication.CreateOptions(getCopilotToken()));
             await client.StartAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
             var models = await client.ListModelsAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
             foreach (var model in models)
@@ -65,7 +54,7 @@ internal static class Commands
         }
         catch (Exception)
         {
-            await error.WriteLineAsync("Could not load Copilot models. Check token permissions and Copilot availability.");
+            await error.WriteLineAsync("Could not load Copilot models. Check gh auth status and your Copilot access.");
             return 1;
         }
     }

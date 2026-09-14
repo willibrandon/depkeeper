@@ -1,9 +1,11 @@
 <Project>
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageFloatingVersionsEnabled>true</CentralPackageFloatingVersionsEnabled>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.13" />
-    <PackageVersion Include="System.CommandLine" Version="2.0.12" />
+    <PackageVersion Include="GitHub.Copilot.SDK" Version="*" />
+    <PackageVersion Include="System.CommandLine" Version="*" />
+    <PackageVersion Include="MSTest" Version="*" />
   </ItemGroup>
 </Project>

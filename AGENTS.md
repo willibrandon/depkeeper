@@ -2,12 +2,15 @@
 
 - Use .NET 10 and the official GitHub.Copilot.SDK package for agent integration.
 - Use the latest stable System.CommandLine release for command-line parsing.
+- Use C# file-based apps for setup and automation utilities.
 - Manage NuGet versions centrally in Directory.Packages.props; keep project PackageReference entries version-free.
+- Resolve the latest stable NuGet packages using floating CPM versions; do not add NuGet lock files or fixed SDK pins.
 - Use MSTest with Microsoft.Testing.Platform for tests.
 - Enforce .editorconfig through build analyzers and dotnet format; keep warnings-as-errors and public XML documentation enabled.
 - Keep one type per file. A top-level Program.cs entry point is allowed.
 - Document every public and internal type and member with triple-slash XML comments.
 - Write each summary on three lines: opening tag, description, and closing tag.
+- Deconstruct tuple variable declarations; IDE0042 is an error.
 - Use Picket for secret scanning; resolve its latest published release at runtime.
 - Keep repository owners, project languages, and verification commands configurable.
 - Keep credentials in runtime secret storage; commit only secret names and placeholders.

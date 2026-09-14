@@ -26,7 +26,7 @@ dotnet test --solution Depkeeper.slnx
 dotnet run --project src/Depkeeper.Cli -- --help
 ```
 
-After setting `COPILOT_GITHUB_TOKEN`, list the models available to your account:
+List models using your GitHub CLI login:
 
 ```sh
 dotnet run --project src/Depkeeper.Cli -- models
@@ -34,8 +34,12 @@ dotnet run --project src/Depkeeper.Cli -- models
 
 ## Setup
 
-See [authentication](docs/authentication.md) for the required GitHub Actions
-secrets. An example configuration is in [examples/depkeeper.yml](examples/depkeeper.yml).
+```sh
+dotnet run --file scripts/setup-auth.cs
+```
+
+Uses your GitHub CLI login to configure authentication. See
+[authentication](docs/authentication.md) and [configuration](docs/configuration.md).
 
 ## License
 

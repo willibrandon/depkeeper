@@ -13,14 +13,16 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
-      - run: dotnet restore --locked-mode
+      - run: dotnet restore
       - run: dotnet format --verify-no-changes --no-restore
+      - run: dotnet format whitespace --folder --include scripts/setup-auth.cs --verify-no-changes
       - run: dotnet build --configuration Release --no-restore
       - run: dotnet test --solution Depkeeper.slnx --configuration Release --no-build
       - run: dotnet run --project src/Depkeeper.Cli --configuration Release --no-build -- --help
+      - run: dotnet run --file scripts/setup-auth.cs -- --help

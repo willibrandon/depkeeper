@@ -31,27 +31,6 @@ public sealed class CommandsTests
     }
 
     /// <summary>
-    /// Missing tokens produce an authentication error before runtime startup.
-    /// </summary>
-    /// <param name="token">The missing or blank credential value.</param>
-    /// <returns>A task representing the test execution.</returns>
-    [TestMethod]
-    [DataRow(null)]
-    [DataRow("")]
-    [DataRow(" ")]
-    public async Task MissingCredentialsFailBeforeStartingCopilot(string? token)
-    {
-        using var output = new StringWriter(CultureInfo.InvariantCulture);
-        using var error = new StringWriter(CultureInfo.InvariantCulture);
-
-        var exitCode = await Commands.RunAsync(["models"], output, error, () => token);
-
-        Assert.AreEqual(1, exitCode);
-        Assert.AreEqual(string.Empty, output.ToString());
-        StringAssert.Contains(error.ToString(), "COPILOT_GITHUB_TOKEN");
-    }
-
-    /// <summary>
     /// Unknown commands fail as usage errors without reading credentials.
     /// </summary>
     /// <returns>A task representing the test execution.</returns>
