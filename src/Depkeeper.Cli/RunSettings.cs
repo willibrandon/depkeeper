@@ -60,6 +60,8 @@ internal sealed partial record RunSettings(string Model, string[] Repositories, 
         var profiles = new Dictionary<string, RepositoryProfile>(configuration.Profiles ?? [], StringComparer.OrdinalIgnoreCase);
         foreach (var profile in profiles.Values)
         {
+            if (profile.MaximumCheckAgeHours is < 0 or > 168 || string.IsNullOrWhiteSpace(profile.RecoveryAssignee))
+                throw new InvalidDataException("Check freshness must be 0-168 hours and recovery requires an assignee.");
             if (!ImageName().IsMatch(profile.Image) || profile.Verify is { Length: 0 } ||
                 (profile.Install ?? []).Any(string.IsNullOrWhiteSpace) || (profile.Verify ?? []).Any(string.IsNullOrWhiteSpace))
                 throw new InvalidDataException("Profiles require a valid container image and nonempty command arrays when specified.");

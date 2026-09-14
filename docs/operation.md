@@ -16,7 +16,9 @@ script when available.
 Before merging, it refreshes the PR, checks the exact revision, reevaluates publication
 age, and lets GitHub enforce branch rules. Missing, pending, failed, or unexpectedly
 skipped required checks prevent merging. Explicitly configured advisory failures are
-reported. The bot does not create release tags.
+reported. Green GitHub Actions checks older than the configured freshness window are
+rerun before merging. This catches advisories published after an earlier audit passed.
+The bot does not create release tags.
 
 After merging, it records the resulting commit and verifies that commit's checks,
 statuses, and complete push workflows. A successful PR check does not substitute for
@@ -25,6 +27,13 @@ selects a different set of mandatory contexts for the base branch.
 Unfinished verification is retained across sweeps, and post-merge failures pause further
 updates in that repository. A later base commit can resolve the blocker after both its
 ancestry and its own CI are verified.
+
+Persistent post-merge failures receive one CI retry. If the same commit still fails,
+the controller may create one `depkeeper/repair-*` branch and ask Copilot for a focused
+fix. It validates and scans the candidate before pushing, creates an assigned and labeled
+recovery PR, verifies its exact head, merges without bypasses, and verifies the resulting
+base commit. Recovery state and attempts persist across runs, so duplicate PRs are not
+created. Changes that may alter dependencies remain subject to publication-age policy.
 
 ## Reports and recovery
 
@@ -51,7 +60,7 @@ toolchain detection, redaction, and workspace containment. Normal CI uses no mod
 Run the **Live repair smoke** workflow, or run locally:
 
 ```sh
-dotnet run --project src/Depkeeper.Cli -- repair-smoke --model gpt-6-astra
+dotnet run --project src/Depkeeper.Cli -- repair-smoke --model gpt-5.6-sol
 ```
 
 This uses a real Copilot session on a disposable broken fixture, requires the original

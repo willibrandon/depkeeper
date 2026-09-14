@@ -13,6 +13,8 @@ internal sealed class MaintenanceRunner
     private readonly IReleaseAgeGate _releaseAge;
     private readonly TimeSpan _pollInterval;
     private readonly PostMergeVerifier _postMerge;
+    private readonly FreshCi _freshCi;
+    private readonly RecoveryRunner _recovery;
 
     /// <summary>
     /// Creates a controller with replaceable GitHub and repair boundaries.
@@ -35,6 +37,8 @@ internal sealed class MaintenanceRunner
         _releaseAge = releaseAge;
         _pollInterval = pollInterval ?? TimeSpan.FromSeconds(10);
         _postMerge = new PostMergeVerifier(github, state, redactor, _clock, _pollInterval);
+        _freshCi = new FreshCi(github, _clock, _pollInterval);
+        _recovery = new RecoveryRunner(github, repairer, state, redactor, releaseAge, _postMerge, _freshCi, _clock, WaitAsync);
     }
 
     /// <summary>
@@ -56,11 +60,39 @@ internal sealed class MaintenanceRunner
             try
             {
                 var profile = settings.Profiles.GetValueOrDefault(repository) ?? new RepositoryProfile();
-                var followups = await _postMerge.RecheckAsync(repository, profile, settings.DryRun, cancellationToken);
+                var candidates = await _github.ListAsync(repository, cancellationToken);
+                if (settings.OnlyPullRequest is int selected && candidates.All(pr => pr.Number != selected))
+                {
+                    var requested = await _github.RefreshAsync(PullRequestSnapshot.Lookup(repository, selected), cancellationToken);
+                    if (requested.State == "MERGED" && requested.MergeCommit is not null &&
+                        !_state.State.PullRequests.ContainsKey(requested.Key))
+                    {
+                        _state.State.PullRequests[requested.Key] = new AttemptState(requested.Head, 0, false,
+                            "Verifying an explicitly selected merge.", _clock.GetUtcNow(), requested.MergeCommit, requested.BaseBranch);
+                        if (!settings.DryRun) _state.Save();
+                    }
+                }
+                var followups = (await _postMerge.RecheckAsync(repository, profile, settings.DryRun, cancellationToken)).ToList();
+                var mutated = false;
+                if (!settings.DryRun && profile.AutoRecover)
+                {
+                    for (var index = 0; index < followups.Count; index++)
+                    {
+                        var entry = followups[index];
+                        if (entry.Outcome != "blocked" || settings.OnlyPullRequest is int only && only != entry.Number) continue;
+                        var key = repository + "#" + entry.Number;
+                        if (!_state.State.PullRequests.TryGetValue(key, out var saved)) continue;
+                        var (outcome, used, changed) = await _recovery.RunAsync(repository, entry.Number, saved, profile, settings,
+                            settings.MaxRepairs - repairs, cancellationToken);
+                        followups[index] = outcome;
+                        repairs += used;
+                        mutated |= changed;
+                        if (used > 0) _state.SetNextRepository((repositoryIndex + 1) % settings.Repositories.Length);
+                        if (changed) break;
+                    }
+                }
                 results.AddRange(followups);
                 var unresolvedMerge = followups.Any(entry => entry.Outcome != "merged");
-                var candidates = await _github.ListAsync(repository, cancellationToken);
-                var mutated = false;
                 foreach (var candidate in candidates.Where(pr => settings.OnlyPullRequest is null || pr.Number == settings.OnlyPullRequest)
                     .OrderBy(pr => MergePolicy.HasFailure(pr, profile)))
                 {
@@ -82,7 +114,8 @@ internal sealed class MaintenanceRunner
                     }
                     _state.State.PullRequests.TryGetValue(current.Key, out var previous);
                     if (previous?.Head != current.Head) previous = null;
-                    if (previous?.Blocked == true && !settings.RetryBlocked)
+                    if (previous?.Blocked == true && !settings.RetryBlocked &&
+                        MergePolicy.GetBlocker(current, current.Head, profile) is not null)
                     {
                         results.Add(new ReportEntry(repository, current.Number, "blocked", previous.Reason));
                         continue;
@@ -107,10 +140,29 @@ internal sealed class MaintenanceRunner
                         if (settings.DryRun)
                         {
                             var blocker = MergePolicy.GetBlocker(current, current.Head, profile);
-                            var outcome = blocker is null ? "would-merge" : MergePolicy.HasFailure(current, profile) ? "would-repair" :
+                            var outcome = _freshCi.Needed(current, profile) ? "would-refresh" : blocker is null ? "would-merge" :
+                                MergePolicy.HasFailure(current, profile) ? "would-repair" :
                                 MergePolicy.IsPending(current) ? "pending" : "blocked";
                             results.Add(new ReportEntry(repository, current.Number,
-                                outcome, blocker ?? "All observed merge gates pass."));
+                                outcome, outcome == "would-refresh" ? "Successful CI is older than the configured freshness window." :
+                                    blocker ?? "All observed merge gates pass."));
+                            continue;
+                        }
+
+                        if (MergePolicy.ChecksFinished(current) && _freshCi.Needed(current, profile))
+                        {
+                            var expected = current.Head;
+                            mutated = true;
+                            current = await _freshCi.EnsureAsync(current, profile, settings.CiTimeout, cancellationToken);
+                            if (current.Head != expected)
+                            {
+                                results.Add(new ReportEntry(repository, current.Number, "pending", "The PR changed during CI refresh."));
+                                continue;
+                            }
+                        }
+                        if (!MergePolicy.ChecksFinished(current))
+                        {
+                            results.Add(new ReportEntry(repository, current.Number, "pending", "CI is still running for this revision."));
                             continue;
                         }
 

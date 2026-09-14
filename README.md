@@ -8,6 +8,8 @@ and reports blockers. It runs in GitHub Actions with your Copilot subscription.
 - Checks the exact PR revision and GitHub merge requirements.
 - Uses Copilot's native editing tools and isolated containers for commands.
 - Verifies repairs independently and scans changes before pushing.
+- Refreshes stale PR checks and verifies the exact merge commit.
+- Creates one bounded recovery PR when persistent post-merge CI can be repaired safely.
 - Remembers blocked revisions and limits repair attempts.
 - Applies a configurable publication cooldown, defaulting to three days.
 - Supports .NET, Node, Rust, Go, Python, JVM projects, and custom toolchains.
@@ -18,7 +20,7 @@ With the latest .NET 10 SDK and `gh` installed:
 
 ```sh
 dotnet run --file scripts/setup-auth.cs
-gh variable set DEPKEEPER_MODEL --body gpt-6-astra
+gh variable set DEPKEEPER_MODEL --body gpt-5.6-sol
 gh variable set DEPKEEPER_REPOSITORIES --body '["OWNER/REPOSITORY"]'
 ```
 

@@ -12,14 +12,15 @@ internal static class TestData
     /// <returns>A synthetic snapshot.</returns>
     internal static PullRequestSnapshot PullRequest(int number = 1) => new("owner/repository", number, "Update dependency",
         "app/dependabot", "dependabot/example", new string('a', 40), "main", false, false, "MERGEABLE", "CLEAN", "",
-        [new CheckSnapshot("tests", "SUCCESS", "https://github.com/owner/repository/actions/runs/123/job/456")]);
+        [new CheckSnapshot("tests", "SUCCESS", "https://github.com/owner/repository/actions/runs/123/job/456", DateTimeOffset.UtcNow)]);
 
     /// <summary>
     /// Creates bounded settings with publication lookups disabled for controller-only tests.
     /// </summary>
     /// <param name="dryRun">Whether writes are disabled.</param>
     /// <returns>The synthetic settings.</returns>
-    internal static RunSettings Settings(bool dryRun = false) => new("auto", ["owner/repository"], [], dryRun, false,
+    internal static RunSettings Settings(bool dryRun = false) => new("auto", ["owner/repository"],
+        new Dictionary<string, RepositoryProfile> { ["owner/repository"] = new(AutoRecover: false) }, dryRun, false,
         3, 2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), null, new ReleaseAgePolicy(0));
 
     /// <summary>

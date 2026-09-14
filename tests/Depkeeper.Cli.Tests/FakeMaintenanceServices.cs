@@ -65,8 +65,44 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     /// </summary>
     internal string? RecoveryCommit { get; set; }
 
+    /// <summary>
+    /// Gets or sets the current base head for recovery tests.
+    /// </summary>
+    internal string BaseHead { get; set; } = new('c', 40);
+
+    /// <summary>
+    /// Gets or sets the independently published recovery branch head.
+    /// </summary>
+    internal string? PublishedRecoveryHead { get; set; }
+
+    /// <summary>
+    /// Gets the number of created recovery PRs.
+    /// </summary>
+    internal int CreatedRecoveries { get; private set; }
+
+    /// <summary>
+    /// Gets the number of requested CI refreshes.
+    /// </summary>
+    internal int CheckRefreshes { get; private set; }
+
+    /// <summary>
+    /// Gets or sets an optional new-branch repair response.
+    /// </summary>
+    internal Func<RecoveryRequest, RepairResult>? OnRecovery { get; set; }
+
+    /// <summary>
+    /// Gets or sets the first CI results on a newly created recovery PR.
+    /// </summary>
+    internal IReadOnlyList<CheckSnapshot>? RecoveryChecks { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether retrying the failed base checks resolves a transient failure.
+    /// </summary>
+    internal bool FailedRerunSucceeds { get; set; }
+
     Task<IReadOnlyList<PullRequestSnapshot>> IGitHubGateway.ListAsync(string repository, CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<PullRequestSnapshot>>(PullRequests.Where(pr => pr.Repository == repository && pr.State == "OPEN")
+        Task.FromResult<IReadOnlyList<PullRequestSnapshot>>(PullRequests.Where(pr =>
+            pr.Repository == repository && pr.State == "OPEN" && !pr.ManagedRecovery)
             .ToArray());
 
     Task<PullRequestSnapshot> IGitHubGateway.RefreshAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken)
@@ -87,8 +123,10 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
         Merges++;
         if (!AcceptMerge) return Task.FromResult<string?>(null);
         var index = PullRequests.FindIndex(pr => pr.Key == pullRequest.Key);
-        PullRequests[index] = pullRequest with { State = "MERGED" };
-        return Task.FromResult<string?>(new string('c', 40));
+        var merged = new string(pullRequest.ManagedRecovery ? 'e' : 'c', 40);
+        PullRequests[index] = pullRequest with { State = "MERGED", MergeCommit = merged };
+        BaseHead = merged;
+        return Task.FromResult<string?>(merged);
     }
 
     Task<IReadOnlyList<CheckSnapshot>> IGitHubGateway.GetCommitChecksAsync(string repository, string commit,
@@ -100,6 +138,45 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
 
     Task<string?> IGitHubGateway.GetBranchDescendantAsync(string repository, string branch, string ancestor,
         CancellationToken cancellationToken) => Task.FromResult(RecoveryCommit);
+
+    Task<string> IGitHubGateway.GetBranchHeadAsync(string repository, string branch, CancellationToken cancellationToken) =>
+        Task.FromResult(branch.StartsWith("depkeeper/", StringComparison.Ordinal) ? PublishedRecoveryHead ?? "" : BaseHead);
+
+    Task<bool> IGitHubGateway.RerunChecksAsync(string repository, string commit, IReadOnlyList<CheckSnapshot> checks, bool failedOnly,
+        CancellationToken cancellationToken)
+    {
+        CheckRefreshes++;
+        if (failedOnly)
+        {
+            if (FailedRerunSucceeds) OnCommitChecks = _ => TestData.PullRequest().Checks;
+            return Task.FromResult(FailedRerunSucceeds);
+        }
+        for (var index = 0; index < PullRequests.Count; index++)
+            PullRequests[index] = PullRequests[index] with
+            {
+                Checks = PullRequests[index].Checks.Select(check => check with { CompletedAt = DateTimeOffset.UtcNow }).ToArray()
+            };
+        return Task.FromResult(true);
+    }
+
+    Task<PullRequestSnapshot?> IGitHubGateway.FindRecoveryAsync(RecoveryRequest request, CancellationToken cancellationToken) =>
+        Task.FromResult(PullRequests.SingleOrDefault(pr => pr.Repository == request.Repository && pr.Branch == request.Branch));
+
+    Task<PullRequestSnapshot> IGitHubGateway.CreateRecoveryPullRequestAsync(RecoveryRequest request, RepositoryProfile profile,
+        CancellationToken cancellationToken)
+    {
+        CreatedRecoveries++;
+        var created = TestData.PullRequest(1001) with
+        {
+            Author = "maintainer",
+            Branch = request.Branch,
+            Head = PublishedRecoveryHead!,
+            ManagedRecovery = true,
+            Checks = RecoveryChecks ?? TestData.PullRequest().Checks
+        };
+        PullRequests.Add(created);
+        return Task.FromResult(created);
+    }
 
     Task IGitHubGateway.CommentAsync(PullRequestSnapshot pullRequest, string body, CancellationToken cancellationToken)
     {
@@ -113,5 +190,15 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
         Repairs++;
         LastRepairLogs = logs;
         return Task.FromResult(OnRepair?.Invoke(pullRequest) ?? new RepairResult(null, "No repair available."));
+    }
+
+    Task<RepairResult> IRepairer.CreateRecoveryAsync(RecoveryRequest request, string logs, RepositoryProfile profile,
+        CancellationToken cancellationToken)
+    {
+        Repairs++;
+        LastRepairLogs = logs;
+        var result = OnRecovery?.Invoke(request) ?? new RepairResult(new string('d', 40), "Validated recovery.");
+        PublishedRecoveryHead = result.Head;
+        return Task.FromResult(result);
     }
 }

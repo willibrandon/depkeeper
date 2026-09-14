@@ -10,5 +10,6 @@ namespace Depkeeper.Cli;
 /// <param name="UpdatedAt">The last state transition.</param>
 /// <param name="MergeHead">A merged commit whose post-merge verification is still tracked.</param>
 /// <param name="MergeBranch">The base branch to inspect for a verified follow-up fix.</param>
+/// <param name="Recovery">The bounded recovery PR associated with a failed merge.</param>
 internal sealed record AttemptState(string Head, int Attempts, bool Blocked, string Reason, DateTimeOffset UpdatedAt,
-    string? MergeHead = null, string? MergeBranch = null);
+    string? MergeHead = null, string? MergeBranch = null, RecoveryState? Recovery = null);

@@ -106,7 +106,7 @@ internal sealed class PostMergeVerifier
                 reason = MergePolicy.GetChecksBlocker(checks, checkPolicy);
                 failed = checks.Any(check => check.Failed &&
                     !(profile.AdvisoryChecks ?? []).Contains(check.Name, StringComparer.Ordinal));
-                if (reason is null || failed || _clock.GetUtcNow() >= deadline) break;
+                if (reason is null || failed && checks.All(check => check.Finished) || _clock.GetUtcNow() >= deadline) break;
                 var remaining = deadline - _clock.GetUtcNow();
                 if (remaining <= TimeSpan.Zero) break;
                 await Task.Delay(remaining < _pollInterval ? remaining : _pollInterval, _clock, cancellationToken);
@@ -115,8 +115,8 @@ internal sealed class PostMergeVerifier
                 !(profile.AdvisoryChecks ?? []).Contains(check.Name, StringComparer.Ordinal)).Select(check => check.Name));
             var outcome = reason is null ? "merged" : failed ? "blocked" :
                 checks.Count == 0 || checks.Any(check => !check.Finished) ? "pending" : "blocked";
-            var detail = reason is null ? $"Merged as {head}; post-merge CI passed." :
-                $"Merged as {head}; post-merge verification: {reason}";
+            var subject = attempt.Recovery?.PullRequest is int recovery ? $"Recovery PR #{recovery} merged as {head}" : $"Merged as {head}";
+            var detail = reason is null ? $"{subject}; post-merge CI passed." : $"{subject}; post-merge verification: {reason}";
             entry = new ReportEntry(repository, number, outcome, detail);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

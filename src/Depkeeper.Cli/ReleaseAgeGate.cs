@@ -8,6 +8,7 @@ internal sealed class ReleaseAgeGate : IReleaseAgeGate
     private readonly Func<PullRequestSnapshot, CancellationToken, Task<IReadOnlyList<DependencyChange>>> _changes;
     private readonly Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>> _publication;
     private readonly TimeProvider _clock;
+    private readonly Func<PullRequestSnapshot, CancellationToken, Task<bool>>? _codeOnly;
 
     /// <summary>
     /// Creates an age gate with replaceable metadata sources.
@@ -15,12 +16,15 @@ internal sealed class ReleaseAgeGate : IReleaseAgeGate
     /// <param name="changes">Retrieves GitHub's dependency diff.</param>
     /// <param name="publication">Retrieves actual package publication timestamps.</param>
     /// <param name="clock">An optional clock for boundary tests.</param>
+    /// <param name="codeOnly">Optional independent confirmation of code-only managed recovery changes.</param>
     internal ReleaseAgeGate(Func<PullRequestSnapshot, CancellationToken, Task<IReadOnlyList<DependencyChange>>> changes,
-        Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>> publication, TimeProvider? clock = null)
+        Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>> publication, TimeProvider? clock = null,
+        Func<PullRequestSnapshot, CancellationToken, Task<bool>>? codeOnly = null)
     {
         _changes = changes;
         _publication = publication;
         _clock = clock ?? TimeProvider.System;
+        _codeOnly = codeOnly;
     }
 
     /// <summary>
@@ -37,6 +41,8 @@ internal sealed class ReleaseAgeGate : IReleaseAgeGate
         try
         {
             var changes = await _changes(pullRequest, cancellationToken);
+            if (changes.Count == 0 && pullRequest.ManagedRecovery && _codeOnly is not null &&
+                await _codeOnly(pullRequest, cancellationToken)) return null;
             if (changes.Count == 0)
                 return policy.AllowUnknown ? null :
                     "GitHub returned no dependency changes; this update's publication age cannot be verified.";

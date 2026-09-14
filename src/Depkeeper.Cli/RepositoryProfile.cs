@@ -10,6 +10,9 @@ namespace Depkeeper.Cli;
 /// <param name="AdvisoryChecks">Nonblocking check contexts that must still be reported.</param>
 /// <param name="ReleaseAge">An optional repository-specific publication-age policy.</param>
 /// <param name="PostMergeChecks">Additional mandatory checks on the resulting merge commit.</param>
+/// <param name="AutoRecover">Whether failed merges may receive a bounded Copilot repair PR.</param>
+/// <param name="RecoveryAssignee">The recovery PR assignee; defaults to the authenticated account.</param>
+/// <param name="MaximumCheckAgeHours">Maximum age of completed PR checks; zero disables the freshness gate.</param>
 internal sealed record RepositoryProfile(string Image = "auto", string[]? Install = null,
     string[]? Verify = null, string[]? RequiredChecks = null, string[]? AdvisoryChecks = null, ReleaseAgePolicy? ReleaseAge = null,
-    string[]? PostMergeChecks = null);
+    string[]? PostMergeChecks = null, bool AutoRecover = true, string RecoveryAssignee = "@me", int MaximumCheckAgeHours = 1);

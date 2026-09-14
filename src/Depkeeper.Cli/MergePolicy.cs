@@ -11,7 +11,7 @@ internal static class MergePolicy
     /// <param name="pullRequest">The current pull request.</param>
     /// <returns>Whether automatic maintenance is eligible.</returns>
     internal static bool IsEligible(PullRequestSnapshot pullRequest) =>
-        pullRequest.Author is "app/dependabot" or "dependabot[bot]" &&
+        (pullRequest.Author is "app/dependabot" or "dependabot[bot]" || pullRequest.ManagedRecovery) &&
         !pullRequest.Draft && !pullRequest.CrossRepository && pullRequest.State == "OPEN";
 
     /// <summary>

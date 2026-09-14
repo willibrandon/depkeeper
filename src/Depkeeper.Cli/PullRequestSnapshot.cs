@@ -17,9 +17,12 @@ namespace Depkeeper.Cli;
 /// <param name="ReviewDecision">The current review decision.</param>
 /// <param name="Checks">The current reported checks.</param>
 /// <param name="State">Whether the pull request is still open.</param>
+/// <param name="MergeCommit">The resulting commit for a merged PR.</param>
+/// <param name="ManagedRecovery">Whether the controller verified ownership of this recovery PR.</param>
 internal sealed record PullRequestSnapshot(string Repository, int Number, string Title, string Author,
     string Branch, string Head, string BaseBranch, bool Draft, bool CrossRepository,
-    string Mergeable, string MergeState, string ReviewDecision, IReadOnlyList<CheckSnapshot> Checks, string State = "OPEN")
+    string Mergeable, string MergeState, string ReviewDecision, IReadOnlyList<CheckSnapshot> Checks, string State = "OPEN",
+    string? MergeCommit = null, bool ManagedRecovery = false)
 {
     /// <summary>
     /// Gets the stable state key for this pull request.
@@ -30,4 +33,13 @@ internal sealed record PullRequestSnapshot(string Repository, int Number, string
     /// Gets the public pull request URL.
     /// </summary>
     internal string Url => $"https://github.com/{Repository}/pull/{Number}";
+
+    /// <summary>
+    /// Creates an identity-only value for an explicit GitHub lookup.
+    /// </summary>
+    /// <param name="repository">The selected repository.</param>
+    /// <param name="number">The PR number to retrieve.</param>
+    /// <returns>A placeholder whose fields must be refreshed before use.</returns>
+    internal static PullRequestSnapshot Lookup(string repository, int number) =>
+        new(repository, number, "", "", "", "", "", false, false, "UNKNOWN", "UNKNOWN", "", []);
 }
