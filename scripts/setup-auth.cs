@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet
 #:package GitHub.Copilot.SDK
 #:package System.CommandLine
 
@@ -23,7 +24,8 @@ command.SetAction(async (result, cancellationToken) =>
         var repository = result.GetValue(repositoryOption);
         if (string.IsNullOrWhiteSpace(repository))
         {
-            var (repositoryExitCode, repositoryName) = await RunGitHubAsync(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], cancellationToken);
+            var (repositoryExitCode, repositoryName) = await RunGitHubAsync(
+                ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], cancellationToken);
             if (repositoryExitCode != 0) throw new InvalidOperationException();
             repository = repositoryName.Trim();
         }
@@ -50,7 +52,8 @@ command.SetAction(async (result, cancellationToken) =>
 
         foreach (var name in (string[])["COPILOT_GITHUB_TOKEN", "GH_MAINTENANCE_TOKEN"])
         {
-            var (configuredExitCode, _) = await RunGitHubAsync(["secret", "set", name, "--repo", repository], cancellationToken, input: token);
+            var (configuredExitCode, _) = await RunGitHubAsync(
+                ["secret", "set", name, "--repo", repository], cancellationToken, input: token);
             if (configuredExitCode != 0)
             {
                 Console.Error.WriteLine($"Could not configure {name} for {repository}.");

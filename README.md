@@ -1,45 +1,50 @@
 # Depkeeper
 
-Daily dependency maintenance powered by GitHub Copilot.
+Daily dependency maintenance powered by GitHub Copilot and .NET.
 
-## Design
+Depkeeper discovers Dependabot PRs, repairs failed checks, merges verified updates,
+and reports blockers. It runs in GitHub Actions with your Copilot subscription.
 
-Depkeeper will discover Dependabot PRs, repair failed checks where possible,
-merge verified updates, and report blockers. It runs in GitHub Actions using
-the GitHub Copilot SDK for .NET.
-
-- Configurable repositories and validation commands.
-- Bounded repair attempts and persistent tracking of blocked work.
-- Deterministic CI and exact-commit checks before merging.
-- Concise reports with actionable failures.
-
-Each owner runs their own instance using their own GitHub and Copilot access.
-
-## Develop
-
-Use the latest .NET 10 SDK.
-
-```sh
-dotnet restore
-dotnet build --no-restore
-dotnet test --solution Depkeeper.slnx
-dotnet run --project src/Depkeeper.Cli -- --help
-```
-
-List models using your GitHub CLI login:
-
-```sh
-dotnet run --project src/Depkeeper.Cli -- models
-```
+- Checks the exact PR revision and GitHub merge requirements.
+- Uses Copilot's native editing tools and isolated containers for commands.
+- Verifies repairs independently and scans changes before pushing.
+- Remembers blocked revisions and limits repair attempts.
+- Applies a configurable publication cooldown, defaulting to three days.
+- Supports .NET, Node, Rust, Go, Python, JVM projects, and custom toolchains.
 
 ## Setup
 
+With the latest .NET 10 SDK and `gh` installed:
+
 ```sh
 dotnet run --file scripts/setup-auth.cs
+gh variable set DEPKEEPER_MODEL --body gpt-6-astra
+gh variable set DEPKEEPER_REPOSITORIES --body '["OWNER/REPOSITORY"]'
 ```
 
-Uses your GitHub CLI login to configure authentication. See
-[authentication](docs/authentication.md) and [configuration](docs/configuration.md).
+The **Maintenance** workflow runs daily at **09:17 UTC**. Its manual trigger
+defaults to a dry run. Each deployment uses its own account and repository list.
+
+## Run locally
+
+```sh
+dotnet run --project src/Depkeeper.Cli -- run --repository OWNER/REPOSITORY --dry-run
+dotnet run --project src/Depkeeper.Cli -- models
+```
+
+Omit `--dry-run` to permit repairs and merges. Repairs require Docker and `picket`
+on PATH. [Configuration](docs/configuration.md) covers profiles, limits, and cooldowns.
+
+## Develop
+
+```sh
+dotnet build
+dotnet test --solution Depkeeper.slnx
+dotnet format --verify-no-changes
+```
+
+The opt-in `repair-smoke` command exercises real Copilot tool use against a
+disposable fixture. [Operation](docs/operation.md) describes checkpoints and reports.
 
 ## License
 

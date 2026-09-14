@@ -8,8 +8,10 @@
 - Use MSTest with Microsoft.Testing.Platform for tests.
 - Pass TestContext.CancellationToken to cancellable operations in tests; MSTEST0049 is an error.
 - Use Assert.Contains instead of StringAssert.Contains; MSTEST0046 is an error.
+- Use the specific MSTest assertion helpers, including Assert.IsEmpty; MSTEST0037 is an error.
 - Enforce .editorconfig through build analyzers and dotnet format; keep warnings-as-errors and public XML documentation enabled.
 - Keep one type per file. A top-level Program.cs entry point is allowed.
+- Keep all C# source lines at or below 140 characters, including file-based apps.
 - Document every public and internal type and member with triple-slash XML comments.
 - Write each summary on three lines: opening tag, description, and closing tag.
 - Deconstruct tuple variable declarations; IDE0042 is an error.

@@ -1,0 +1,18 @@
+{
+  "model": "auto",
+  "repositories": ["OWNER/REPOSITORY"],
+  "releaseAge": {
+    "minimumDays": 3,
+    "securityFixesBypass": true,
+    "allowUnknown": false
+  },
+  "profiles": {
+    "OWNER/REPOSITORY": {
+      "image": "node:24-trixie",
+      "install": ["npm ci"],
+      "verify": ["npm test", "npm run build"],
+      "requiredChecks": ["CI"],
+      "advisoryChecks": []
+    }
+  }
+}

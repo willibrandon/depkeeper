@@ -24,6 +24,8 @@ internal static class Commands
         var models = new Command("models", "List models available through your Copilot subscription.");
         models.SetAction((_, token) => ListModelsAsync(output, error, getCopilotToken, token));
         root.Subcommands.Add(models);
+        root.Subcommands.Add(MaintenanceCommand.Create(output, error));
+        root.Subcommands.Add(RepairSmokeCommand.Create(output, error));
         var configuration = new InvocationConfiguration
         {
             Output = output,

@@ -1,0 +1,80 @@
+name: Maintenance
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Inspect without model calls or repository changes
+        type: boolean
+        default: true
+      repository:
+        description: Optional single OWNER/REPO
+        type: string
+      pr:
+        description: Optional PR number (requires one repository)
+        type: string
+      retry_blocked:
+        description: Retry previously blocked revisions
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: depkeeper-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet build --configuration Release
+      - name: Install latest released Picket
+        run: |
+          dotnet tool install Picket --tool-path "$RUNNER_TEMP/picket"
+          echo "$RUNNER_TEMP/picket" >> "$GITHUB_PATH"
+      - name: Restore last completed checkpoint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: dotnet run --file scripts/restore-state.cs
+      - name: Maintain dependencies
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          GH_MAINTENANCE_TOKEN: ${{ secrets.GH_MAINTENANCE_TOKEN }}
+          DEPKEEPER_MODEL: ${{ vars.DEPKEEPER_MODEL }}
+          DEPKEEPER_REPOSITORIES: ${{ vars.DEPKEEPER_REPOSITORIES }}
+          DEPKEEPER_MIN_RELEASE_AGE_DAYS: ${{ vars.DEPKEEPER_MIN_RELEASE_AGE_DAYS }}
+          DEPKEEPER_MAX_REPAIRS: ${{ vars.DEPKEEPER_MAX_REPAIRS }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          ONLY_REPOSITORY: ${{ inputs.repository }}
+          ONLY_PR: ${{ inputs.pr }}
+          RETRY_BLOCKED: ${{ inputs.retry_blocked }}
+        run: dotnet run --file scripts/run-maintenance.cs
+      - name: Preserve checkpoint
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: depkeeper-state
+          path: .state/state.json
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Preserve report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: depkeeper-report
+          path: .state/report.md
+          if-no-files-found: ignore
+          retention-days: 30

@@ -1,0 +1,33 @@
+using System.Text.RegularExpressions;
+
+namespace Depkeeper.Cli;
+
+/// <summary>
+/// Removes runtime credentials and common token forms from diagnostic text.
+/// </summary>
+internal sealed partial class Redactor
+{
+    private readonly string[] _secrets;
+
+    /// <summary>
+    /// Creates a redactor for the current execution's credentials.
+    /// </summary>
+    /// <param name="secrets">Credential values that must never reach reports.</param>
+    internal Redactor(params string?[] secrets) => _secrets = secrets.Where(value => !string.IsNullOrWhiteSpace(value))
+        .Select(value => value!).Distinct(StringComparer.Ordinal).OrderByDescending(value => value.Length).ToArray();
+
+    /// <summary>
+    /// Sanitizes text before it enters an agent prompt or report.
+    /// </summary>
+    /// <param name="value">Potentially sensitive text.</param>
+    /// <returns>Text with known credentials and token patterns removed.</returns>
+    internal string Clean(string value)
+    {
+        foreach (var secret in _secrets) value = value.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
+        return Tokens().Replace(value, "[REDACTED]");
+    }
+
+    [GeneratedRegex(@"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|" +
+        @"sk-(?:proj-|ant-)?[A-Za-z0-9_-]{24,}|https?://[^\s/@]+:[^\s/@]+@)", RegexOptions.CultureInvariant)]
+    private static partial Regex Tokens();
+}
