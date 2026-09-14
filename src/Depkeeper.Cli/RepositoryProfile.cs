@@ -13,6 +13,8 @@ namespace Depkeeper.Cli;
 /// <param name="AutoRecover">Whether failed merges may receive a bounded Copilot repair PR.</param>
 /// <param name="RecoveryAssignee">The recovery PR assignee; defaults to the authenticated account.</param>
 /// <param name="MaximumCheckAgeHours">Maximum age of completed PR checks; zero disables the freshness gate.</param>
+/// <param name="Prepare">Trusted prerequisite commands prepended to detected installation.</param>
 internal sealed record RepositoryProfile(string Image = "auto", string[]? Install = null,
     string[]? Verify = null, string[]? RequiredChecks = null, string[]? AdvisoryChecks = null, ReleaseAgePolicy? ReleaseAge = null,
-    string[]? PostMergeChecks = null, bool AutoRecover = true, string RecoveryAssignee = "@me", int MaximumCheckAgeHours = 1);
+    string[]? PostMergeChecks = null, bool AutoRecover = true, string RecoveryAssignee = "@me", int MaximumCheckAgeHours = 1,
+    string[]? Prepare = null);

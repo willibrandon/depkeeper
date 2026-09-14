@@ -20,5 +20,7 @@ public sealed class ReportingTests
         Assert.DoesNotContain("<script>", report);
         Assert.Contains("REDACTED", report);
         Assert.Contains("https://github.com/owner/repository/pull/1", report);
+        Assert.DoesNotContain("\u001b[31m", redactor.Clean("\u001b[31mfailure\u001b[0m"));
+        Assert.AreEqual("failure", redactor.Clean("\u001b[31mfailure\u001b[0m"));
     }
 }

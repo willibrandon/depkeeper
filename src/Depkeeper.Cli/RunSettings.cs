@@ -57,13 +57,22 @@ internal sealed partial record RunSettings(string Model, string[] Repositories, 
             throw new InvalidDataException("Limits must be: repairs 0-100, attempts 1-5, repair minutes 1-120, CI minutes 1-60.");
         if (onlyPullRequest is not null && (onlyPullRequest < 1 || selected.Length != 1))
             throw new InvalidDataException("--pr requires a positive PR number and exactly one repository.");
-        var profiles = new Dictionary<string, RepositoryProfile>(configuration.Profiles ?? [], StringComparer.OrdinalIgnoreCase);
+        var profileJson = Environment.GetEnvironmentVariable("DEPKEEPER_PROFILES");
+        var configuredProfiles = configuration.Profiles;
+        if (!string.IsNullOrWhiteSpace(profileJson))
+        {
+            var overlay = JsonSerializer.Deserialize("{\"profiles\":" + profileJson + "}", JsonContext.Default.DeploymentConfiguration)
+                ?? throw new InvalidDataException("Invalid DEPKEEPER_PROFILES configuration.");
+            configuredProfiles = overlay.Profiles;
+        }
+        var profiles = new Dictionary<string, RepositoryProfile>(configuredProfiles ?? [], StringComparer.OrdinalIgnoreCase);
         foreach (var profile in profiles.Values)
         {
             if (profile.MaximumCheckAgeHours is < 0 or > 168 || string.IsNullOrWhiteSpace(profile.RecoveryAssignee))
                 throw new InvalidDataException("Check freshness must be 0-168 hours and recovery requires an assignee.");
             if (!ImageName().IsMatch(profile.Image) || profile.Verify is { Length: 0 } ||
-                (profile.Install ?? []).Any(string.IsNullOrWhiteSpace) || (profile.Verify ?? []).Any(string.IsNullOrWhiteSpace))
+                (profile.Prepare ?? []).Any(string.IsNullOrWhiteSpace) || (profile.Install ?? []).Any(string.IsNullOrWhiteSpace) ||
+                (profile.Verify ?? []).Any(string.IsNullOrWhiteSpace))
                 throw new InvalidDataException("Profiles require a valid container image and nonempty command arrays when specified.");
             if ((profile.RequiredChecks ?? []).Concat(profile.AdvisoryChecks ?? []).Concat(profile.PostMergeChecks ?? [])
                 .Any(string.IsNullOrWhiteSpace))

@@ -7,6 +7,23 @@ namespace Depkeeper.Cli.Tests;
 public sealed class ToolchainDetectorTests
 {
     /// <summary>
+    /// Prepends deployment prerequisites without losing the detected package installation.
+    /// </summary>
+    [TestMethod]
+    public void AddsTrustedPrerequisitesToDetectedInstallation()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-toolchain-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Join(directory, "package.json"), """{"scripts":{"test":"node --test"}}""");
+            var detected = ToolchainDetector.Resolve(directory, new RepositoryProfile(Prepare: ["install-trusted-tool"]));
+            Assert.AreEqual("install-trusted-tool", detected.Install.First());
+            Assert.AreEqual("npm install", detected.Install.Last());
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
     /// Uses the repository's complete verification command and keeps an explicit original license check.
     /// </summary>
     [TestMethod]

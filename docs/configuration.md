@@ -6,6 +6,7 @@ Set deployment variables with `gh variable set NAME --body VALUE`:
 | --- | --- |
 | `DEPKEEPER_MODEL` | Copilot model ID; default `auto` |
 | `DEPKEEPER_REPOSITORIES` | JSON array of `OWNER/REPO` names |
+| `DEPKEEPER_PROFILES` | JSON object of trusted repository profiles |
 | `DEPKEEPER_MIN_RELEASE_AGE_DAYS` | Ordinary-update cooldown; default `3` |
 | `DEPKEEPER_MAX_REPAIRS` | Maximum repair sessions per daily sweep; default `3` |
 
@@ -17,10 +18,12 @@ An optional `depkeeper.json` configures repository-specific environments and che
 See [the example](../examples/depkeeper.json). CLI selections override repository/model
 defaults; Actions variables override the file's repository/model defaults.
 
-Profiles can supply `image`, `install`, `verify`, `requiredChecks`, `postMergeChecks`, `advisoryChecks`,
+Profiles can supply `image`, `prepare`, `install`, `verify`, `requiredChecks`, `postMergeChecks`, `advisoryChecks`,
 `maximumCheckAgeHours`, `autoRecover`, `recoveryAssignee`, and `releaseAge`. Explicit image and command overrides
 take precedence over detection. Successful GitHub Actions checks older than one hour are rerun by default before merge.
 Set `maximumCheckAgeHours` to zero to disable that freshness gate.
+`prepare` adds deployment-controlled prerequisites before the detected package installation
+without replacing it. Environment profiles replace profiles from `depkeeper.json`.
 Commands use the image's POSIX shell and PATH. Exact Node engine versions and npm
 `packageManager` declarations are honored; other version ranges use the default image.
 Detected Node images include controller-installed CMake, Ninja, and pkg-config for

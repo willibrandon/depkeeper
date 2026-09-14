@@ -17,12 +17,13 @@ internal static partial class ToolchainDetector
     internal static ToolchainProfile Resolve(string directory, RepositoryProfile profile)
     {
         if (profile.Image != "auto" && profile.Install is not null && profile.Verify is not null)
-            return new ToolchainProfile("custom", profile.Image, profile.Install, profile.Verify);
+            return new ToolchainProfile("custom", profile.Image, (profile.Prepare ?? []).Concat(profile.Install).ToArray(), profile.Verify);
         var detected = Detect(directory);
         if (detected is null && (profile.Install is null || profile.Verify is null || profile.Image == "auto"))
             throw new InvalidOperationException("Configure an image, install commands, and verify commands for this toolchain.");
+        var install = (profile.Prepare ?? []).Concat(profile.Install ?? detected!.Install).ToArray();
         return new ToolchainProfile(detected?.Name ?? "custom", profile.Image == "auto" ? detected!.Image : profile.Image,
-            profile.Install ?? detected!.Install, profile.Verify ?? detected!.Verify);
+            install, profile.Verify ?? detected!.Verify);
     }
 
     private static ToolchainProfile? Detect(string directory)
