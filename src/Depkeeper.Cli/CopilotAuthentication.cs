@@ -34,13 +34,7 @@ internal static class CopilotAuthentication
 
         // A stable installed executable retains its macOS Keychain authorization across rebuilds.
         var searchPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        foreach (var directory in searchPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (!Path.IsPathFullyQualified(directory)) continue;
-            var candidate = Path.Combine(directory, "copilot");
-            if (File.Exists(candidate)) return candidate;
-        }
-
-        return null;
+        return searchPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Where(Path.IsPathFullyQualified).Select(directory => Path.Join(directory, "copilot")).FirstOrDefault(File.Exists);
     }
 }

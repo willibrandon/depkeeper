@@ -36,5 +36,26 @@ jobs:
       - run: dotnet build scripts/setup-auth.cs --configuration Release
       - run: dotnet build scripts/restore-state.cs --configuration Release
       - run: dotnet build scripts/run-maintenance.cs --configuration Release
+      - run: dotnet build scripts/check-codeql.cs --configuration Release
       - name: Analyze
         uses: github/codeql-action/analyze@v4
+        with:
+          output: ${{ runner.temp }}/codeql-results
+          upload: failure-only
+      - name: Filter SDK-generated style findings
+        uses: advanced-security/filter-sarif@v1.1
+        with:
+          input: ${{ runner.temp }}/codeql-results/csharp.sarif
+          output: ${{ runner.temp }}/codeql-results/csharp.sarif
+          patterns: |
+            -**/obj/**/generated/System.Text.Json.SourceGeneration/**/*.cs:cs/useless-cast-to-self
+            -**/obj/**/generated/System.Text.RegularExpressions.Generator/**/*.cs:cs/useless-cast-to-self
+            -**/obj/**/generated/System.Text.RegularExpressions.Generator/**/*.cs:cs/useless-assignment-to-local
+            -**/obj/**/generated/System.Text.RegularExpressions.Generator/**/*.cs:cs/nested-if-statements
+      - name: Upload findings
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ runner.temp }}/codeql-results/csharp.sarif
+          category: .github/workflows/codeql.yml:analyze
+      - name: Require a clean analysis
+        run: dotnet run --file scripts/check-codeql.cs -- "$RUNNER_TEMP/codeql-results/csharp.sarif"

@@ -38,7 +38,7 @@ internal sealed class ContainerRunner : IDisposable
             var uid = await ProcessRunner.RunAsync("id", ["-u"], cancellationToken: cancellationToken);
             var gid = await ProcessRunner.RunAsync("id", ["-g"], cancellationToken: cancellationToken);
             if (uid.ExitCode != 0 || gid.ExitCode != 0) throw new IOException("Repairs require a Linux or macOS Docker host.");
-            var cache = Path.Combine(Path.GetDirectoryName(_directory)!, "cache");
+            var cache = Path.Join(Path.GetDirectoryName(_directory)!, "cache");
             Directory.CreateDirectory(cache);
             var arguments = new List<string>
             {
@@ -51,7 +51,7 @@ internal sealed class ContainerRunner : IDisposable
                 "--env", "GIT_CONFIG_COUNT=1", "--env", "GIT_CONFIG_KEY_0=safe.directory", "--env", "GIT_CONFIG_VALUE_0=/workspace",
                 "--mount", $"type=bind,source={cache},target=/cache",
                 "--mount", $"type=bind,source={_directory},target=/workspace",
-                "--mount", $"type=bind,source={Path.Combine(_directory, ".git")},target=/workspace/.git,readonly",
+                "--mount", $"type=bind,source={Path.Join(_directory, ".git")},target=/workspace/.git,readonly",
                 _image, "sh", "-c", "export PATH=/cache/toolchain/node_modules/.bin:$PATH; " + command
             };
             var result = await ProcessRunner.RunAsync("docker", arguments, cancellationToken: cancellationToken);
@@ -63,7 +63,9 @@ internal sealed class ContainerRunner : IDisposable
             try { await ProcessRunner.RunAsync("docker", ["rm", "--force", name], cancellationToken: cleanup.Token); }
             catch (Exception exception) when (exception is IOException or OperationCanceledException or
                 System.ComponentModel.Win32Exception)
-            { }
+            {
+                Console.Error.WriteLine("Could not confirm removal of the validation container.");
+            }
             _gate.Release();
         }
     }

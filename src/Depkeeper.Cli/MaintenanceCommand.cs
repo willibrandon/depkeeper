@@ -85,7 +85,7 @@ internal static class MaintenanceCommand
                 return entries.Any(entry => entry.Outcome == "blocked") ? 2 : 0;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return 130; }
-            catch (Exception exception)
+            catch (Exception exception) when (FailurePolicy.CanReport(exception))
             {
                 var redactor = new Redactor(Environment.GetEnvironmentVariable("GH_MAINTENANCE_TOKEN"),
                     Environment.GetEnvironmentVariable("COPILOT_GITHUB_TOKEN"));

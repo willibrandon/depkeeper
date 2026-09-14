@@ -54,7 +54,7 @@ internal static class Commands
         {
             return 130;
         }
-        catch (Exception)
+        catch (Exception exception) when (FailurePolicy.CanReport(exception))
         {
             await error.WriteLineAsync("Could not load Copilot models. Check gh auth status and your Copilot access.");
             return 1;

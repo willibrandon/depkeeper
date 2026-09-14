@@ -44,7 +44,7 @@ internal sealed class CopilotRepairer : IRepairer
         CancellationToken cancellationToken)
     {
         var temporary = Directory.CreateTempSubdirectory("depkeeper-").FullName;
-        var directory = Path.Combine(temporary, "checkout");
+        var directory = Path.Join(temporary, "checkout");
         try
         {
             Require(await GitAsync(temporary,
@@ -55,17 +55,16 @@ internal sealed class CopilotRepairer : IRepairer
             var tracked = await GitAsync(directory, ["ls-files", "-z"], cancellationToken);
             Require(tracked);
             var trackedFiles = tracked.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
-            foreach (var file in trackedFiles.Where(file => Path.GetFileName(file) == "package.json"))
+            foreach (var file in trackedFiles.Where(file => Path.GetFileName(file) == "package.json" && policy.Allows(file, false)))
             {
-                if (policy.Allows(file, false))
-                    manifests[file] = await File.ReadAllTextAsync(Path.Combine(directory, file), cancellationToken);
+                manifests[file] = await File.ReadAllTextAsync(Path.Join(directory, file), cancellationToken);
             }
             await ScanFilesAsync(directory, trackedFiles, cancellationToken);
             var toolchain = ToolchainDetector.Resolve(directory, profile);
             var install = toolchain.Install;
             var verify = toolchain.Verify;
             var image = toolchain.Name == "node" && profile.Image == "auto"
-                ? await NodeImageBuilder.BuildAsync(toolchain.Image, File.Exists(Path.Combine(directory, "Cargo.toml")), cancellationToken)
+                ? await NodeImageBuilder.BuildAsync(toolchain.Image, File.Exists(Path.Join(directory, "Cargo.toml")), cancellationToken)
                 : toolchain.Image;
             using var container = new ContainerRunner(directory, image, _redactor);
             var setup = await container.RunAsync(string.Join(" && ", install), cancellationToken);
@@ -86,11 +85,11 @@ internal sealed class CopilotRepairer : IRepairer
             if (paths.Length > 30) throw new InvalidOperationException("Repair touched more than 30 files; manual review is required.");
             foreach (var path in paths)
             {
-                if (!policy.Allows(path, true) || !File.Exists(Path.Combine(directory, path)))
+                if (!policy.Allows(path, true) || !File.Exists(Path.Join(directory, path)))
                     throw new InvalidOperationException($"Repair changed a protected path, deleted a file, or introduced a link: {path}.");
                 if (manifests.TryGetValue(path, out var before) &&
                     !WorkspacePolicy.PreservesManifest(before,
-                        await File.ReadAllTextAsync(Path.Combine(directory, path), cancellationToken)))
+                        await File.ReadAllTextAsync(Path.Join(directory, path), cancellationToken)))
                     throw new InvalidOperationException(
                         "Repair changed package scripts, identity, version, or supported engines; manual review is required.");
             }
@@ -109,12 +108,12 @@ internal sealed class CopilotRepairer : IRepairer
             Require(staged);
             var stagedPaths = staged.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries);
             if (stagedPaths.Length > 30 ||
-                stagedPaths.Any(path => !policy.Allows(path, true) || !File.Exists(Path.Combine(directory, path))))
+                stagedPaths.Any(path => !policy.Allows(path, true) || !File.Exists(Path.Join(directory, path))))
                 throw new InvalidOperationException("Validation produced prohibited changes; the candidate was not pushed.");
             foreach (var path in stagedPaths.Where(manifests.ContainsKey))
             {
                 if (!WorkspacePolicy.PreservesManifest(manifests[path],
-                    await File.ReadAllTextAsync(Path.Combine(directory, path), cancellationToken)))
+                    await File.ReadAllTextAsync(Path.Join(directory, path), cancellationToken)))
                     throw new InvalidOperationException("Verification modified package scripts or identity; the candidate was not pushed.");
             }
             await ScanFilesAsync(directory, stagedPaths, cancellationToken);
@@ -132,7 +131,10 @@ internal sealed class CopilotRepairer : IRepairer
         finally
         {
             try { Directory.Delete(temporary, true); }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine("Could not remove the temporary repair checkout.");
+            }
         }
     }
 
@@ -151,7 +153,7 @@ internal sealed class CopilotRepairer : IRepairer
         var options = CopilotAuthentication.CreateOptions(_copilotToken);
         options.Mode = CopilotClientMode.Empty;
         options.WorkingDirectory = directory;
-        options.BaseDirectory = Path.Combine(Path.GetDirectoryName(directory)!, "copilot");
+        options.BaseDirectory = Path.Join(Path.GetDirectoryName(directory)!, "copilot");
         await using var client = new CopilotClient(options);
         await client.StartAsync(cancellationToken);
         var tool = CopilotTool.DefineTool(async (string command) =>
@@ -229,9 +231,9 @@ internal sealed class CopilotRepairer : IRepairer
                 if (!policy.Allows(file, false)) throw new InvalidOperationException("A linked or sensitive path requires manual review.");
                 if (Path.GetFileName(file) is ".gitignore" or ".gitleaks.toml" or ".gitleaksignore" or
                     ".picket.toml" or ".picketignore") continue;
-                var source = Path.Combine(directory, file);
+                var source = Path.Join(directory, file);
                 if (!File.Exists(source)) continue;
-                var destination = Path.Combine(export, file);
+                var destination = Path.Join(export, file);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                 File.Copy(source, destination);
             }

@@ -15,7 +15,7 @@ public sealed class ToolchainDetectorTests
         var directory = Directory.CreateTempSubdirectory("depkeeper-toolchain-").FullName;
         try
         {
-            File.WriteAllText(Path.Combine(directory, "package.json"), """
+            File.WriteAllText(Path.Join(directory, "package.json"), """
                 {"engines":{"node":"24.19.0"},"packageManager":"npm@12.0.2","scripts":{"test":"node --test"}}
                 """);
             var detected = ToolchainDetector.Resolve(directory, new RepositoryProfile());
@@ -49,7 +49,7 @@ public sealed class ToolchainDetectorTests
         var directory = Directory.CreateTempSubdirectory("depkeeper-toolchain-").FullName;
         try
         {
-            File.WriteAllText(Path.Combine(directory, manifest), string.Empty);
+            File.WriteAllText(Path.Join(directory, manifest), string.Empty);
             Assert.AreEqual(expected, ToolchainDetector.Resolve(directory, new RepositoryProfile()).Name);
         }
         finally { Directory.Delete(directory, true); }
@@ -64,7 +64,7 @@ public sealed class ToolchainDetectorTests
         var directory = Directory.CreateTempSubdirectory("depkeeper-toolchain-").FullName;
         try
         {
-            File.WriteAllText(Path.Combine(directory, "package.json"), """{"scripts":{"check":"node --test"}}""");
+            File.WriteAllText(Path.Join(directory, "package.json"), """{"scripts":{"check":"node --test"}}""");
             var detected = ToolchainDetector.Resolve(directory, new RepositoryProfile());
             Assert.AreEqual("node", detected.Name);
             Assert.Contains("npm run check", detected.Verify);
