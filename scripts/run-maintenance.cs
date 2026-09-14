@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:include ../src/Depkeeper.Cli/ProcessRunner.cs
 #:include ../src/Depkeeper.Cli/CommandResult.cs
+#:include WorkflowExitCode.cs
 
 using Depkeeper.Cli;
 
@@ -25,4 +26,9 @@ foreach (var (variable, option) in new (string, string)[]
 var result = await ProcessRunner.RunAsync("dotnet", arguments);
 Console.Write(result.Output);
 Console.Error.Write(result.Error);
-return result.ExitCode;
+if (result.ExitCode == 2)
+{
+    Console.WriteLine("Maintenance completed with blockers recorded in the report.");
+    return WorkflowExitCode.Map(result.ExitCode);
+}
+return WorkflowExitCode.Map(result.ExitCode);
