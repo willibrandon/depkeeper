@@ -117,6 +117,8 @@ internal sealed class MaintenanceRunner
                             _state.Set(current.Key,
                                 new AttemptState(current.Head, attempts, false, "Repair in progress.", _clock.GetUtcNow()));
                             var logs = await _github.GetFailureLogsAsync(current, cancellationToken);
+                            if (settings.RetryBlocked && previous?.Blocked == true)
+                                logs += "\nPrevious independent verification for this revision:\n" + previous.Reason;
                             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                             timeout.CancelAfter(settings.RepairTimeout);
                             RepairResult repair;

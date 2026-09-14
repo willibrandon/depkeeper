@@ -45,6 +45,11 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     /// </summary>
     internal int Refreshes { get; private set; }
 
+    /// <summary>
+    /// Gets the evidence supplied to the most recent repair attempt.
+    /// </summary>
+    internal string? LastRepairLogs { get; private set; }
+
     Task<IReadOnlyList<PullRequestSnapshot>> IGitHubGateway.ListAsync(string repository, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<PullRequestSnapshot>>(PullRequests.Where(pr => pr.Repository == repository).ToArray());
 
@@ -77,6 +82,7 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
         CancellationToken cancellationToken)
     {
         Repairs++;
+        LastRepairLogs = logs;
         return Task.FromResult(OnRepair?.Invoke(pullRequest) ?? new RepairResult(null, "No repair available."));
     }
 }

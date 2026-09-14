@@ -8,6 +8,30 @@ namespace Depkeeper.Cli.Tests;
 public sealed class MaintenanceRunnerTests(TestContext testContext)
 {
     /// <summary>
+    /// Supplies the previous independent verification failure when an operator retries a blocked revision.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task ExplicitRetryIncludesIndependentVerificationFeedback()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices();
+            var pr = TestData.PullRequest() with { Checks = [new CheckSnapshot("tests", "FAILURE", "")] };
+            services.PullRequests.Add(pr);
+            var store = new StateStore(Path.Join(directory, "state.json"));
+            store.Set(pr.Key, new AttemptState(pr.Head, 1, true, "npm audit still reports vulnerable qs.", DateTimeOffset.UtcNow));
+            var runner = new MaintenanceRunner(services, services, store, new Redactor(), TestData.AgeGate());
+            await runner.RunAsync(TestData.Settings() with { RetryBlocked = true }, testContext.CancellationToken);
+            Assert.IsNotNull(services.LastRepairLogs);
+            Assert.Contains("npm audit still reports vulnerable qs.", services.LastRepairLogs);
+            Assert.AreEqual(1, services.Repairs);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
     /// Reports unfinished GitHub calculations as pending rather than actionable blockers.
     /// </summary>
     /// <param name="check">The observed check state.</param>
