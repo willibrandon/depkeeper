@@ -76,9 +76,12 @@ internal sealed partial class GitHubGateway : IGitHubGateway
             text.AppendLine($"Check: {check.Name} ({check.State})");
             var match = RunUrl().Match(check.Url);
             if (!match.Success || !runs.Add(match.Groups[1].Value)) continue;
+            string[] selection = match.Groups[2].Success ? ["--job", match.Groups[2].Value, "--log"] : ["--log-failed"];
             var result = await ExecuteAsync(
-                ["run", "view", match.Groups[1].Value, "--repo", pullRequest.Repository, "--log-failed"], cancellationToken);
-            if (result.ExitCode == 0) text.AppendLine(result.Output.Length > 24000 ? result.Output[^24000..] : result.Output);
+                ["run", "view", match.Groups[1].Value, "--repo", pullRequest.Repository, .. selection], cancellationToken);
+            if (result.ExitCode == 0)
+                text.AppendLine(result.Output.Length > 24000 ? result.Output[..8000] + "\n[log truncated]\n" +
+                    result.Output[^16000..] : result.Output);
             if (runs.Count >= 4) break;
         }
         return _redactor.Clean(text.ToString());
@@ -296,6 +299,6 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         if (result.ExitCode != 0) throw new IOException("GitHub operation failed; check repository access and current branch rules.");
     }
 
-    [GeneratedRegex(@"/actions/runs/(\d+)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"/actions/runs/(\d+)(?:/job/(\d+))?", RegexOptions.CultureInvariant)]
     private static partial Regex RunUrl();
 }
