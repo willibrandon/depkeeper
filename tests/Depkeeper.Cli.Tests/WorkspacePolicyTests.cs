@@ -54,4 +54,27 @@ public sealed class WorkspacePolicyTests
         Assert.IsTrue(WorkspacePolicy.PreservesManifest(before, update));
         Assert.IsFalse(WorkspacePolicy.PreservesManifest(before, bypass));
     }
+
+    /// <summary>
+    /// Allows an existing install permission to follow its exact dependency update without broadening script execution.
+    /// </summary>
+    [TestMethod]
+    public void AllowsExactDependencyPermissionMigration()
+    {
+        const string before = """
+            {"devDependencies":{"tree-sitter-cli":"0.26.12"},"allowScripts":{"tree-sitter-cli@0.26.12":true}}
+            """;
+        const string update = """
+            {"devDependencies":{"tree-sitter-cli":"0.26.13"},"allowScripts":{"tree-sitter-cli@0.26.13":true}}
+            """;
+        const string broadened = """
+            {"devDependencies":{"tree-sitter-cli":"0.26.13"},"allowScripts":{"tree-sitter-cli@0.26.13":true,"other@1.0.0":true}}
+            """;
+        const string changedPermission = """
+            {"devDependencies":{"tree-sitter-cli":"0.26.13"},"allowScripts":{"tree-sitter-cli@0.26.13":false}}
+            """;
+        Assert.IsTrue(WorkspacePolicy.PreservesManifest(before, update));
+        Assert.IsFalse(WorkspacePolicy.PreservesManifest(before, broadened));
+        Assert.IsFalse(WorkspacePolicy.PreservesManifest(before, changedPermission));
+    }
 }

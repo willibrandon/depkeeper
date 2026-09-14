@@ -12,6 +12,8 @@ Those cases are reported for manual review rather than bypassing checks.
 Generated `LICENSES/*.txt` entries may be removed when the original npm license check
 is selected and passes independent verification. Node projects use their full `verify`
 script when available.
+An existing npm `allowScripts` permission may follow an exact dependency version update
+only when its value is unchanged and no additional package receives permission.
 
 Before merging, it refreshes the PR, checks the exact revision, reevaluates publication
 age, and lets GitHub enforce branch rules. Missing, pending, failed, or unexpectedly
