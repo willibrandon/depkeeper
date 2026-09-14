@@ -102,7 +102,7 @@ internal sealed class MaintenanceRunner
                         {
                             var blocker = MergePolicy.GetBlocker(current, current.Head, profile);
                             var outcome = blocker is null ? "would-merge" : MergePolicy.HasFailure(current, profile) ? "would-repair" :
-                                MergePolicy.ChecksFinished(current) ? "blocked" : "pending";
+                                MergePolicy.IsPending(current) ? "pending" : "blocked";
                             results.Add(new ReportEntry(repository, current.Number,
                                 outcome, blocker ?? "All observed merge gates pass."));
                             continue;
@@ -157,7 +157,7 @@ internal sealed class MaintenanceRunner
                         if (reason is not null)
                         {
                             results.Add(new ReportEntry(repository, current.Number,
-                                MergePolicy.ChecksFinished(current) ? "blocked" : "pending", reason));
+                                MergePolicy.IsPending(current) ? "pending" : "blocked", reason));
                             continue;
                         }
                         if (!await _github.MergeAsync(current, cancellationToken))

@@ -8,17 +8,25 @@ namespace Depkeeper.Cli.Tests;
 public sealed class MaintenanceRunnerTests(TestContext testContext)
 {
     /// <summary>
-    /// Reports running CI as pending rather than treating a normal build as a blocker.
+    /// Reports unfinished GitHub calculations as pending rather than actionable blockers.
     /// </summary>
+    /// <param name="check">The observed check state.</param>
+    /// <param name="mergeable">The observed mergeability calculation.</param>
     /// <returns>The test task.</returns>
     [TestMethod]
-    public async Task DryRunDistinguishesPendingCiFromFailures()
+    [DataRow("IN_PROGRESS", "MERGEABLE")]
+    [DataRow("SUCCESS", "UNKNOWN")]
+    public async Task DryRunDistinguishesPendingCiFromFailures(string check, string mergeable)
     {
         var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
         try
         {
             var services = new FakeMaintenanceServices();
-            services.PullRequests.Add(TestData.PullRequest() with { Checks = [new CheckSnapshot("tests", "IN_PROGRESS", "")] });
+            services.PullRequests.Add(TestData.PullRequest() with
+            {
+                Checks = [new CheckSnapshot("tests", check, "")],
+                Mergeable = mergeable
+            });
             var runner = new MaintenanceRunner(services, services, new StateStore(Path.Combine(directory, "state.json")),
                 new Redactor(), TestData.AgeGate());
             var results = await runner.RunAsync(TestData.Settings(true), testContext.CancellationToken);
