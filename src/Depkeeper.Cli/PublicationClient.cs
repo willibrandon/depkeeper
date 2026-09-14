@@ -10,17 +10,21 @@ internal sealed class PublicationClient
     private readonly HttpClient _client;
     private readonly Dictionary<string, DateTimeOffset?> _cache = new(StringComparer.Ordinal);
     private readonly Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? _actions;
+    private readonly Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? _docker;
 
     /// <summary>
     /// Creates a publication reader without GitHub or model credentials.
     /// </summary>
     /// <param name="client">A credential-free HTTP client.</param>
     /// <param name="actions">Optional GitHub Actions publication lookup.</param>
+    /// <param name="docker">Optional Docker Hub digest publication lookup.</param>
     internal PublicationClient(HttpClient client,
-        Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? actions = null)
+        Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? actions = null,
+        Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? docker = null)
     {
         _client = client;
         _actions = actions;
+        _docker = docker;
     }
 
     /// <summary>
@@ -33,6 +37,7 @@ internal sealed class PublicationClient
     {
         if (dependency.Ecosystem is "actions" or "githubactions" or "github-actions")
             return _actions is null ? null : await _actions(dependency, cancellationToken);
+        if (dependency.Ecosystem == "docker") return _docker is null ? null : await _docker(dependency, cancellationToken);
         var system = dependency.Ecosystem.ToLowerInvariant() switch
         {
             "npm" => "NPM",
