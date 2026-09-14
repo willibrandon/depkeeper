@@ -19,10 +19,11 @@ namespace Depkeeper.Cli;
 /// <param name="State">Whether the pull request is still open.</param>
 /// <param name="MergeCommit">The resulting commit for a merged PR.</param>
 /// <param name="ManagedRecovery">Whether the controller verified ownership of this recovery PR.</param>
+/// <param name="BaseHead">The exact base revision used by the PR comparison.</param>
 internal sealed record PullRequestSnapshot(string Repository, int Number, string Title, string Author,
     string Branch, string Head, string BaseBranch, bool Draft, bool CrossRepository,
     string Mergeable, string MergeState, string ReviewDecision, IReadOnlyList<CheckSnapshot> Checks, string State = "OPEN",
-    string? MergeCommit = null, bool ManagedRecovery = false)
+    string? MergeCommit = null, bool ManagedRecovery = false, string? BaseHead = null)
 {
     /// <summary>
     /// Gets the stable state key for this pull request.

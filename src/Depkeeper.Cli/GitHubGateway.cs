@@ -10,7 +10,7 @@ namespace Depkeeper.Cli;
 /// </summary>
 internal sealed partial class GitHubGateway : IGitHubGateway
 {
-    private const string Fields = "number,title,author,headRefName,headRefOid,baseRefName,isDraft,isCrossRepository," +
+    private const string Fields = "number,title,author,headRefName,headRefOid,baseRefName,baseRefOid,isDraft,isCrossRepository," +
         "mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,state,mergeCommit";
     private readonly Dictionary<string, string?> _environment;
     private readonly Redactor _redactor;
@@ -455,7 +455,7 @@ internal sealed partial class GitHubGateway : IGitHubGateway
             value.GetProperty("isDraft").GetBoolean(), value.GetProperty("isCrossRepository").GetBoolean(),
             Text(value, "mergeable"), Text(value, "mergeStateStatus"), Text(value, "reviewDecision"), checks,
             Text(value, "state", "OPEN"), value.TryGetProperty("mergeCommit", out var merged) &&
-                merged.ValueKind == JsonValueKind.Object ? Text(merged, "oid") : null);
+                merged.ValueKind == JsonValueKind.Object ? Text(merged, "oid") : null, false, Text(value, "baseRefOid"));
     }
 
     /// <summary>
@@ -467,7 +467,8 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     internal async Task<IReadOnlyList<DependencyChange>> GetDependencyChangesAsync(PullRequestSnapshot pullRequest,
         CancellationToken cancellationToken)
     {
-        var comparison = Uri.EscapeDataString(pullRequest.BaseBranch + "..." + pullRequest.Head);
+        var baseHead = pullRequest.BaseHead ?? pullRequest.BaseBranch;
+        var comparison = Uri.EscapeDataString(baseHead + "..." + pullRequest.Head);
         var result = await ExecuteAsync(["api", $"repos/{pullRequest.Repository}/dependency-graph/compare/{comparison}"],
             cancellationToken);
         RequireSuccess(result);
@@ -489,7 +490,7 @@ internal sealed partial class GitHubGateway : IGitHubGateway
                 var lockPath = directory + "package-lock.json";
                 if (!locks.TryGetValue(lockPath, out var content))
                 {
-                    content = await ReadRepositoryFileAsync(pullRequest, lockPath, cancellationToken);
+                    content = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.Head, lockPath, cancellationToken);
                     locks[lockPath] = content;
                 }
                 if (content is not null)
@@ -504,7 +505,8 @@ internal sealed partial class GitHubGateway : IGitHubGateway
                 directory = parent.Contains('/') ? parent[..(parent.LastIndexOf('/') + 1)] : string.Empty;
             }
         }
-        return changes;
+        var dockerChanges = await GetDockerChangesAsync(pullRequest, cancellationToken);
+        return changes.Concat(dockerChanges).Distinct().ToArray();
     }
 
     /// <summary>
@@ -516,18 +518,40 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     internal async Task<bool> IsCodeOnlyRecoveryAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken)
     {
         if (!pullRequest.ManagedRecovery) return false;
+        var files = await GetPullRequestFilesAsync(pullRequest, cancellationToken);
+        return files.Length is > 0 and <= 30 && files.All(DependencyEditPolicy.IsCodeOnly);
+    }
+
+    private async Task<IReadOnlyList<DependencyChange>> GetDockerChangesAsync(PullRequestSnapshot pullRequest,
+        CancellationToken cancellationToken)
+    {
+        var files = await GetPullRequestFilesAsync(pullRequest, cancellationToken);
+        var changes = new List<DependencyChange>();
+        foreach (var path in files.Select(file => Text(file, "filename")).Where(DockerDependencyParser.IsDockerfile))
+        {
+            var before = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.BaseHead ?? pullRequest.BaseBranch,
+                path, cancellationToken);
+            var after = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.Head, path, cancellationToken);
+            changes.AddRange(DockerDependencyParser.Compare(before, after));
+        }
+        return changes;
+    }
+
+    private async Task<JsonElement[]> GetPullRequestFilesAsync(PullRequestSnapshot pullRequest,
+        CancellationToken cancellationToken)
+    {
         var result = await ExecuteAsync(["api", $"repos/{pullRequest.Repository}/pulls/{Number(pullRequest)}/files?per_page=100",
             "--paginate", "--slurp"], cancellationToken);
         RequireSuccess(result);
         using var document = JsonDocument.Parse(result.Output);
-        var files = document.RootElement.EnumerateArray().SelectMany(page => page.EnumerateArray()).ToArray();
-        return files.Length is > 0 and <= 30 && files.All(DependencyEditPolicy.IsCodeOnly);
+        return document.RootElement.EnumerateArray().SelectMany(page => page.EnumerateArray()).Select(file => file.Clone()).ToArray();
     }
 
-    private async Task<string?> ReadRepositoryFileAsync(PullRequestSnapshot pullRequest, string path, CancellationToken cancellationToken)
+    private async Task<string?> ReadRepositoryFileAsync(string repository, string reference, string path,
+        CancellationToken cancellationToken)
     {
-        var result = await ExecuteAsync(["api", $"repos/{pullRequest.Repository}/contents/{Uri.EscapeDataString(path)}" +
-            "?ref=" + Uri.EscapeDataString(pullRequest.Head)], cancellationToken);
+        var result = await ExecuteAsync(["api", $"repos/{repository}/contents/{Uri.EscapeDataString(path)}" +
+            "?ref=" + Uri.EscapeDataString(reference)], cancellationToken);
         if (result.ExitCode != 0) return null;
         using var document = JsonDocument.Parse(result.Output);
         if (Text(document.RootElement, "encoding") != "base64") return null;
