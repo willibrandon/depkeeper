@@ -77,4 +77,23 @@ public sealed class WorkspacePolicyTests
         Assert.IsFalse(WorkspacePolicy.PreservesManifest(before, broadened));
         Assert.IsFalse(WorkspacePolicy.PreservesManifest(before, changedPermission));
     }
+
+    /// <summary>
+    /// Allows a stale permission key to catch up to an exact dependency that Dependabot already updated.
+    /// </summary>
+    [TestMethod]
+    public void AllowsStaleExactPermissionCorrection()
+    {
+        const string before = """
+            {"devDependencies":{"tree-sitter-cli":"0.27.0"},"allowScripts":{"tree-sitter-cli@0.26.13":true}}
+            """;
+        const string corrected = """
+            {"devDependencies":{"tree-sitter-cli":"0.27.0"},"allowScripts":{"tree-sitter-cli@0.27.0":true}}
+            """;
+        const string changedAgain = """
+            {"devDependencies":{"tree-sitter-cli":"0.28.0"},"allowScripts":{"tree-sitter-cli@0.28.0":true}}
+            """;
+        Assert.IsTrue(WorkspacePolicy.PreservesManifest(before, corrected));
+        Assert.IsFalse(WorkspacePolicy.PreservesManifest(before, changedAgain));
+    }
 }

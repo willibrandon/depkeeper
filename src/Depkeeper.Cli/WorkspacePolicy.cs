@@ -130,9 +130,12 @@ internal sealed class WorkspacePolicy
     {
         if (!before.TryGetProperty(field, out var oldDependencies) || oldDependencies.ValueKind != JsonValueKind.Object ||
             !oldDependencies.TryGetProperty(name, out var oldVersion) || oldVersion.ValueKind != JsonValueKind.String ||
-            oldVersion.GetString() != oldPermissionVersion || !after.TryGetProperty(field, out var newDependencies) ||
+            !after.TryGetProperty(field, out var newDependencies) ||
             newDependencies.ValueKind != JsonValueKind.Object || !newDependencies.TryGetProperty(name, out var newVersion) ||
             newVersion.ValueKind != JsonValueKind.String || !NpmLockResolver.IsExact(newVersion.GetString()!)) return null;
+        var oldDependencyVersion = oldVersion.GetString();
+        var newDependencyVersion = newVersion.GetString();
+        if (oldDependencyVersion != oldPermissionVersion && oldDependencyVersion != newDependencyVersion) return null;
         return name + "@" + newVersion.GetString();
     }
 }
