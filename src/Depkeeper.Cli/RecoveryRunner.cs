@@ -200,6 +200,7 @@ internal sealed class RecoveryRunner
                 settings.CiTimeout, cancellationToken), used, mutated);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (TimeoutException) { throw; }
         catch (Exception exception) when (FailurePolicy.CanReport(exception))
         {
             var reason = exception is OperationCanceledException ? "Recovery exceeded its time budget." :

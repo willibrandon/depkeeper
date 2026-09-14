@@ -129,7 +129,7 @@ public sealed class PostMergeVerificationTests(TestContext testContext)
     }
 
     /// <summary>
-    /// Retains pending post-merge CI without raising an actionable blocker or repeating the merge.
+    /// Fails the run instead of reporting before post-merge CI finishes.
     /// </summary>
     /// <returns>The test task.</returns>
     [TestMethod]
@@ -145,8 +145,8 @@ public sealed class PostMergeVerificationTests(TestContext testContext)
             services.PullRequests.Add(TestData.PullRequest());
             var path = Path.Join(directory, "state.json");
             var runner = new MaintenanceRunner(services, services, new StateStore(path), new Redactor(), TestData.AgeGate());
-            var results = await runner.RunAsync(TestData.Settings() with { CiTimeout = TimeSpan.Zero }, testContext.CancellationToken);
-            Assert.AreEqual("pending", results.Single().Outcome);
+            await Assert.ThrowsAsync<TimeoutException>(() =>
+                runner.RunAsync(TestData.Settings() with { CiTimeout = TimeSpan.Zero }, testContext.CancellationToken));
             Assert.IsFalse(new StateStore(path).State.PullRequests.Values.Single().Blocked);
             services.OnCommitChecks = _ => [new CheckSnapshot("build", "SUCCESS", "")];
             runner = new MaintenanceRunner(services, services, new StateStore(path), new Redactor(), TestData.AgeGate());

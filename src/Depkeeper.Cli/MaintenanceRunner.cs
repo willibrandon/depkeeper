@@ -74,7 +74,8 @@ internal sealed class MaintenanceRunner
                         if (!settings.DryRun) _state.Save();
                     }
                 }
-                var followups = (await _postMerge.RecheckAsync(repository, profile, settings.DryRun, cancellationToken)).ToList();
+                var followups = (await _postMerge.RecheckAsync(repository, profile, settings.DryRun, settings.CiTimeout,
+                    cancellationToken)).ToList();
                 var mutated = false;
                 if (!settings.DryRun && profile.AutoRecover)
                 {
@@ -254,6 +255,7 @@ internal sealed class MaintenanceRunner
                             "Nonblocking checks: " + string.Join(", ", advisory)));
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch (TimeoutException) { throw; }
                     catch (Exception exception) when (FailurePolicy.CanReport(exception))
                     {
                         var reason = _redactor.Clean(exception.Message);
@@ -275,6 +277,7 @@ internal sealed class MaintenanceRunner
                     results.Add(new ReportEntry(repository, 0, "clear", "No open Dependabot PRs."));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (TimeoutException) { throw; }
             catch (Exception exception) when (FailurePolicy.CanReport(exception))
             {
                 results.Add(new ReportEntry(repository, 0, "blocked", _redactor.Clean(exception.Message)));

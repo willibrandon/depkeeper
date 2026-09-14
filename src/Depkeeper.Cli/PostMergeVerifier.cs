@@ -36,10 +36,11 @@ internal sealed class PostMergeVerifier
     /// <param name="repository">The selected repository.</param>
     /// <param name="profile">The repository's verification policy.</param>
     /// <param name="dryRun">Whether checkpoints are read-only.</param>
+    /// <param name="wait">The maximum time to wait for checks to finish.</param>
     /// <param name="cancellationToken">Cancels retrieval.</param>
     /// <returns>Results for the tracked merged commits.</returns>
     internal async Task<IReadOnlyList<ReportEntry>> RecheckAsync(string repository, RepositoryProfile profile, bool dryRun,
-        CancellationToken cancellationToken)
+        TimeSpan wait, CancellationToken cancellationToken)
     {
         var entries = new List<ReportEntry>();
         var prefix = repository + "#";
@@ -47,7 +48,7 @@ internal sealed class PostMergeVerifier
             .Where(pair => pair.Key.StartsWith(prefix, StringComparison.Ordinal) && pair.Value.MergeHead is not null).ToArray())
         {
             var number = int.Parse(key.AsSpan(prefix.Length), CultureInfo.InvariantCulture);
-            var entry = await VerifyAsync(repository, number, attempt, profile, dryRun, TimeSpan.Zero, cancellationToken);
+            var entry = await VerifyAsync(repository, number, attempt, profile, dryRun, wait, cancellationToken);
             if (entry.Outcome != "merged" && attempt.MergeBranch is not null)
             {
                 var descendant = await _github.GetBranchDescendantAsync(repository, attempt.MergeBranch, attempt.MergeHead!,
@@ -111,15 +112,19 @@ internal sealed class PostMergeVerifier
                 if (remaining <= TimeSpan.Zero) break;
                 await Task.Delay(remaining < _pollInterval ? remaining : _pollInterval, _clock, cancellationToken);
             }
+            var pending = !failed && (checks.Count == 0 || checks.Any(check => !check.Finished));
             if (failed) reason = "Failed checks: " + string.Join(", ", checks.Where(check => check.Failed &&
                 !(profile.AdvisoryChecks ?? []).Contains(check.Name, StringComparer.Ordinal)).Select(check => check.Name));
-            var outcome = reason is null ? "merged" : failed ? "blocked" :
-                checks.Count == 0 || checks.Any(check => !check.Finished) ? "pending" : "blocked";
+            if (pending)
+                throw new TimeoutException(
+                    $"Exact-commit verification did not finish within {wait.TotalMinutes:0.#} minutes for {head}.");
+            var outcome = reason is null ? "merged" : "blocked";
             var subject = attempt.Recovery?.PullRequest is int recovery ? $"Recovery PR #{recovery} merged as {head}" : $"Merged as {head}";
             var detail = reason is null ? $"{subject}; post-merge CI passed." : $"{subject}; post-merge verification: {reason}";
             entry = new ReportEntry(repository, number, outcome, detail);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (TimeoutException) { throw; }
         catch (Exception exception) when (FailurePolicy.CanReport(exception))
         {
             entry = new ReportEntry(repository, number, "blocked", $"Merged as {head}; could not verify post-merge CI: " +
