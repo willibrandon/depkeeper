@@ -30,6 +30,23 @@ internal interface IGitHubGateway
     Task<string> GetFailureLogsAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Retrieves all unresolved inline review threads for the current PR revision.
+    /// </summary>
+    /// <param name="pullRequest">The PR to inspect.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>The unresolved review conversations.</returns>
+    Task<IReadOnlyList<ReviewThread>> GetReviewThreadsAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Resolves review threads after the requested paths pass independent validation.
+    /// </summary>
+    /// <param name="pullRequest">The exact verified PR revision.</param>
+    /// <param name="threadIds">The unchanged reviewed threads to resolve.</param>
+    /// <param name="cancellationToken">Cancels the mutations.</param>
+    Task ResolveReviewThreadsAsync(PullRequestSnapshot pullRequest, IReadOnlyList<string> threadIds,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Updates an outdated branch without bypassing the expected-head check.
     /// </summary>
     /// <param name="pullRequest">The expected pull request revision.</param>

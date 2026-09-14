@@ -14,6 +14,7 @@ internal sealed class RecoveryRunner
     private readonly IReleaseAgeGate _releaseAge;
     private readonly PostMergeVerifier _postMerge;
     private readonly FreshCi _freshCi;
+    private readonly ReviewCoordinator _reviews;
     private readonly TimeProvider _clock;
     private readonly Func<PullRequestSnapshot, TimeSpan, bool, CancellationToken, Task<PullRequestSnapshot>> _wait;
 
@@ -40,6 +41,7 @@ internal sealed class RecoveryRunner
         _releaseAge = releaseAge;
         _postMerge = postMerge;
         _freshCi = freshCi;
+        _reviews = new ReviewCoordinator(github, redactor);
         _clock = clock;
         _wait = wait;
     }
@@ -153,7 +155,8 @@ internal sealed class RecoveryRunner
             var expectedHead = pullRequest.Head;
             pullRequest = await _freshCi.EnsureAsync(pullRequest, profile, settings.CiTimeout, cancellationToken);
             if (pullRequest.Head != expectedHead) throw new InvalidOperationException("The recovery PR changed during verification.");
-            while (MergePolicy.HasFailure(pullRequest, profile))
+            var reviewThreads = await _reviews.GetAsync(pullRequest, cancellationToken);
+            while (MergePolicy.HasFailure(pullRequest, profile) || reviewThreads.Count > 0)
             {
                 if (recovery.Blocked || recovery.Attempts >= settings.MaxAttempts)
                     throw new InvalidOperationException(recovery.Reason ?? "Recovery attempt limit reached.");
@@ -164,6 +167,7 @@ internal sealed class RecoveryRunner
                 mutated = true;
                 Save();
                 var logs = await _github.GetFailureLogsAsync(pullRequest, cancellationToken);
+                logs += _reviews.Format(reviewThreads);
                 logs += "\nPrevious recovery verification:\n" + recovery.Reason;
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(settings.RepairTimeout);
@@ -173,9 +177,14 @@ internal sealed class RecoveryRunner
                 Save();
                 pullRequest = await _wait(pullRequest with { Head = repaired.Head }, settings.CiTimeout, false, cancellationToken);
                 if (pullRequest.Head != repaired.Head) throw new InvalidOperationException("The recovery PR changed after repair.");
+                reviewThreads = await _reviews.ResolveAddressedAsync(pullRequest, reviewThreads,
+                    repaired.ChangedPaths ?? [], cancellationToken);
             }
             expectedHead = pullRequest.Head;
             pullRequest = await _github.RefreshAsync(pullRequest, cancellationToken);
+            reviewThreads = await _reviews.GetAsync(pullRequest, cancellationToken);
+            if (reviewThreads.Count > 0)
+                return (Report("blocked", $"Recovery PR #{pullRequest.Number} has unresolved review feedback."), used, mutated);
             var blocker = MergePolicy.GetBlocker(pullRequest, expectedHead, profile);
             if (blocker is not null) return (Report(MergePolicy.IsPending(pullRequest) ? "pending" : "blocked",
                 $"Recovery PR #{pullRequest.Number}: {blocker}"), used, mutated);

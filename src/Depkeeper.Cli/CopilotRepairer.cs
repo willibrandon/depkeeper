@@ -162,7 +162,7 @@ internal sealed class CopilotRepairer : IRepairer
             var head = await GitAsync(directory, ["rev-parse", "HEAD"], cancellationToken);
             Require(head);
             Require(await GitAsync(directory, ["push", "origin", "HEAD:refs/heads/" + pullRequest.Branch], cancellationToken));
-            return new RepairResult(head.Output.Trim(), summary);
+            return new RepairResult(head.Output.Trim(), summary, stagedPaths);
         }
         finally
         {

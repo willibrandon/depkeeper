@@ -15,6 +15,7 @@ internal sealed class MaintenanceRunner
     private readonly PostMergeVerifier _postMerge;
     private readonly FreshCi _freshCi;
     private readonly RecoveryRunner _recovery;
+    private readonly ReviewCoordinator _reviews;
 
     /// <summary>
     /// Creates a controller with replaceable GitHub and repair boundaries.
@@ -39,6 +40,7 @@ internal sealed class MaintenanceRunner
         _postMerge = new PostMergeVerifier(github, state, redactor, _clock, _pollInterval);
         _freshCi = new FreshCi(github, _clock, _pollInterval);
         _recovery = new RecoveryRunner(github, repairer, state, redactor, releaseAge, _postMerge, _freshCi, _clock, WaitAsync);
+        _reviews = new ReviewCoordinator(github, redactor);
     }
 
     /// <summary>
@@ -112,10 +114,11 @@ internal sealed class MaintenanceRunner
                         results.Add(new ReportEntry(repository, current.Number, "cooldown", ageBlocker));
                         continue;
                     }
+                    var reviewThreads = await _reviews.GetAsync(current, cancellationToken);
                     _state.State.PullRequests.TryGetValue(current.Key, out var previous);
                     if (previous?.Head != current.Head) previous = null;
                     if (previous?.Blocked == true && !settings.RetryBlocked &&
-                        MergePolicy.GetBlocker(current, current.Head, profile) is not null)
+                        (MergePolicy.GetBlocker(current, current.Head, profile) is not null || reviewThreads.Count > 0))
                     {
                         results.Add(new ReportEntry(repository, current.Number, "blocked", previous.Reason));
                         continue;
@@ -140,11 +143,13 @@ internal sealed class MaintenanceRunner
                         if (settings.DryRun)
                         {
                             var blocker = MergePolicy.GetBlocker(current, current.Head, profile);
-                            var outcome = _freshCi.Needed(current, profile) ? "would-refresh" : blocker is null ? "would-merge" :
-                                MergePolicy.HasFailure(current, profile) ? "would-repair" :
+                            var outcome = _freshCi.Needed(current, profile) ? "would-refresh" :
+                                reviewThreads.Count > 0 || MergePolicy.HasFailure(current, profile) ? "would-repair" :
+                                blocker is null ? "would-merge" :
                                 MergePolicy.IsPending(current) ? "pending" : "blocked";
                             results.Add(new ReportEntry(repository, current.Number,
                                 outcome, outcome == "would-refresh" ? "Successful CI is older than the configured freshness window." :
+                                    reviewThreads.Count > 0 ? $"{reviewThreads.Count} unresolved review thread(s)." :
                                     blocker ?? "All observed merge gates pass."));
                             continue;
                         }
@@ -166,7 +171,8 @@ internal sealed class MaintenanceRunner
                             continue;
                         }
 
-                        while (MergePolicy.HasFailure(current, profile) && attempts < settings.MaxAttempts && repairs < settings.MaxRepairs)
+                        while ((MergePolicy.HasFailure(current, profile) || reviewThreads.Count > 0) &&
+                            attempts < settings.MaxAttempts && repairs < settings.MaxRepairs)
                         {
                             attempts++;
                             repairs++;
@@ -175,6 +181,7 @@ internal sealed class MaintenanceRunner
                             _state.Set(current.Key,
                                 new AttemptState(current.Head, attempts, false, "Repair in progress.", _clock.GetUtcNow()));
                             var logs = await _github.GetFailureLogsAsync(current, cancellationToken);
+                            logs += _reviews.Format(reviewThreads);
                             if (settings.RetryBlocked && previous?.Blocked == true)
                                 logs += "\nPrevious independent verification for this revision:\n" + previous.Reason;
                             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -194,19 +201,30 @@ internal sealed class MaintenanceRunner
                             if (current.Head != repair.Head)
                                 throw new InvalidOperationException(
                                     "The PR changed after repair; inspect the new revision before continuing.");
+                            reviewThreads = await _reviews.ResolveAddressedAsync(current, reviewThreads,
+                                repair.ChangedPaths ?? [], cancellationToken);
                         }
 
-                        if (MergePolicy.HasFailure(current, profile))
+                        if (MergePolicy.HasFailure(current, profile) || reviewThreads.Count > 0)
                         {
                             if (attempts >= settings.MaxAttempts)
                                 throw new InvalidOperationException(
-                                    "Repair attempt limit reached. Failing checks: " + FailedNames(current));
+                                    "Repair attempt limit reached. Remaining checks or review threads: " +
+                                    FailedNames(current, reviewThreads));
                             results.Add(new ReportEntry(repository, current.Number, "deferred",
-                                "Daily repair budget reached. Failing checks: " + FailedNames(current)));
+                                "Daily repair budget reached. Remaining checks or review threads: " +
+                                FailedNames(current, reviewThreads)));
                             continue;
                         }
                         var verifiedHead = current.Head;
                         current = await _github.RefreshAsync(current, cancellationToken);
+                        reviewThreads = await _reviews.GetAsync(current, cancellationToken);
+                        if (reviewThreads.Count > 0)
+                        {
+                            results.Add(new ReportEntry(repository, current.Number, "blocked",
+                                "Unresolved review feedback remains on the exact PR revision."));
+                            continue;
+                        }
                         var finalAgeBlocker = await _releaseAge.GetBlockerAsync(current, agePolicy, cancellationToken);
                         if (finalAgeBlocker is not null)
                         {
@@ -284,7 +302,12 @@ internal sealed class MaintenanceRunner
         return latest;
     }
 
-    private static string FailedNames(PullRequestSnapshot pullRequest) => string.Join(", ", pullRequest.Checks
-        .Where(check => check.State is "FAILURE" or "ERROR" or "TIMED_OUT" or "CANCELLED" or "ACTION_REQUIRED")
-        .Select(check => check.Name));
+    private static string FailedNames(PullRequestSnapshot pullRequest, IReadOnlyList<ReviewThread>? reviews = null)
+    {
+        var names = pullRequest.Checks
+            .Where(check => check.State is "FAILURE" or "ERROR" or "TIMED_OUT" or "CANCELLED" or "ACTION_REQUIRED")
+            .Select(check => check.Name).ToList();
+        if (reviews?.Count > 0) names.Add($"{reviews.Count} unresolved review thread(s)");
+        return string.Join(", ", names);
+    }
 }

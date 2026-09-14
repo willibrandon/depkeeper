@@ -5,4 +5,5 @@ namespace Depkeeper.Cli;
 /// </summary>
 /// <param name="Head">The pushed revision, or null when no repair was produced.</param>
 /// <param name="Summary">The diagnostic summary.</param>
-internal sealed record RepairResult(string? Head, string Summary);
+/// <param name="ChangedPaths">The paths independently observed in the validated candidate.</param>
+internal sealed record RepairResult(string? Head, string Summary, string[]? ChangedPaths = null);
