@@ -28,7 +28,7 @@ internal static class NodeImageBuilder
         var directory = Directory.CreateTempSubdirectory("depkeeper-image-").FullName;
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(directory, "Dockerfile"), dockerfile, cancellationToken);
+            await File.WriteAllTextAsync(Path.Join(directory, "Dockerfile"), dockerfile, cancellationToken);
             var result = await ProcessRunner.RunAsync("docker", ["build", "--tag", image, directory],
                 cancellationToken: cancellationToken);
             if (result.ExitCode != 0)

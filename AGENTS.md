@@ -30,6 +30,7 @@
 - Assign willibrandon whenever creating a PR in this repository.
 - Read the existing repository labels before adding one or two relevant labels to a PR.
 - When a new label is needed, create it with both a color and a description.
+- Verify the repository's open CodeQL alerts after merging, including informational findings; a successful scan alone is insufficient.
 
 ## Read-only references
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env dotnet
 #:package GitHub.Copilot.SDK
 #:package System.CommandLine
+#:include ../src/Depkeeper.Cli/FailurePolicy.cs
 
 using System.CommandLine;
 using System.Diagnostics;
+using Depkeeper.Cli;
 using GitHub.Copilot;
 
 var repositoryOption = new Option<string?>("--repo") { Description = "Deployment repository (defaults to the current GitHub repository)." };
@@ -50,7 +52,8 @@ command.SetAction(async (result, cancellationToken) =>
             if (models.Count == 0) throw new InvalidOperationException();
         }
 
-        foreach (var name in (string[])["COPILOT_GITHUB_TOKEN", "GH_MAINTENANCE_TOKEN"])
+        string[] secretNames = ["COPILOT_GITHUB_TOKEN", "GH_MAINTENANCE_TOKEN"];
+        foreach (var name in secretNames)
         {
             var (configuredExitCode, _) = await RunGitHubAsync(
                 ["secret", "set", name, "--repo", repository], cancellationToken, input: token);
@@ -68,7 +71,7 @@ command.SetAction(async (result, cancellationToken) =>
     {
         return 130;
     }
-    catch (Exception)
+    catch (Exception exception) when (FailurePolicy.CanReport(exception))
     {
         Console.Error.WriteLine("Setup failed. Verify that gh is installed and your GitHub login has Copilot and repository access.");
         return 1;

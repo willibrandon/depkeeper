@@ -27,7 +27,7 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
                 Checks = [new CheckSnapshot("tests", check, "")],
                 Mergeable = mergeable
             });
-            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Combine(directory, "state.json")),
+            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Join(directory, "state.json")),
                 new Redactor(), TestData.AgeGate());
             var results = await runner.RunAsync(TestData.Settings(true), testContext.CancellationToken);
             Assert.AreEqual("pending", results.Single().Outcome);
@@ -54,7 +54,7 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
                 services.PullRequests[0] = pr with { Head = new string((char)('a' + services.Repairs), 40) };
                 return new RepairResult(services.PullRequests[0].Head, "Candidate repair.");
             };
-            var path = Path.Combine(directory, "state.json");
+            var path = Path.Join(directory, "state.json");
             var settings = TestData.Settings() with { MaxRepairs = 1 };
             for (var sweep = 0; sweep < 3; sweep++)
             {
@@ -90,7 +90,7 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
             var age = new ReleaseAgeGate((pr, _) => Task.FromResult<IReadOnlyList<DependencyChange>>(
                 [new("added", "npm", "example", pr.Head == original.Head ? "old" : "new", [])]),
                 (change, _) => Task.FromResult<DateTimeOffset?>(DateTimeOffset.UtcNow.AddDays(change.Version == "old" ? -7 : 0)));
-            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Combine(directory, "state.json")),
+            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Join(directory, "state.json")),
                 new Redactor(), age, pollInterval: TimeSpan.Zero);
             var results = await runner.RunAsync(TestData.Settings() with { ReleaseAge = new ReleaseAgePolicy() },
                 testContext.CancellationToken);
@@ -122,7 +122,7 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
                 services.PullRequests[0] = TestData.PullRequest() with { Head = new string('b', 40) };
                 return new RepairResult(services.PullRequests[0].Head, "Fixed the incompatibility.");
             };
-            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Combine(directory, "state.json")),
+            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Join(directory, "state.json")),
                 new Redactor(), TestData.AgeGate(), pollInterval: TimeSpan.Zero);
             var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
             Assert.AreEqual(1, services.Repairs);
@@ -145,14 +145,14 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
         {
             var services = new FakeMaintenanceServices();
             services.PullRequests.Add(TestData.PullRequest());
-            var state = new StateStore(Path.Combine(directory, "state.json"));
+            var state = new StateStore(Path.Join(directory, "state.json"));
             var runner = new MaintenanceRunner(services, services, state, new Redactor(), TestData.AgeGate());
             var results = await runner.RunAsync(TestData.Settings(true), testContext.CancellationToken);
             Assert.AreEqual("would-merge", results.Single().Outcome);
             Assert.AreEqual(0, services.Merges);
             Assert.AreEqual(0, services.Repairs);
             Assert.AreEqual(0, services.Comments);
-            Assert.IsFalse(File.Exists(Path.Combine(directory, "state.json")));
+            Assert.IsFalse(File.Exists(Path.Join(directory, "state.json")));
         }
         finally { Directory.Delete(directory, true); }
     }
@@ -172,7 +172,7 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
                 OnRefresh = (pr, count) => count > 1 ? pr with { Head = new string('b', 40) } : pr
             };
             services.PullRequests.Add(TestData.PullRequest());
-            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Combine(directory, "state.json")),
+            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Join(directory, "state.json")),
                 new Redactor(), TestData.AgeGate());
             var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
             Assert.AreEqual(0, services.Merges);
@@ -197,7 +197,7 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
                 MergeState = "BLOCKED",
                 Checks = [new CheckSnapshot("tests", "FAILURE", "")]
             });
-            var path = Path.Combine(directory, "state.json");
+            var path = Path.Join(directory, "state.json");
             var runner = new MaintenanceRunner(services, services, new StateStore(path), new Redactor(), TestData.AgeGate());
             await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
             runner = new MaintenanceRunner(services, services, new StateStore(path), new Redactor(), TestData.AgeGate());
@@ -221,7 +221,7 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
         {
             var services = new FakeMaintenanceServices();
             services.PullRequests.AddRange([TestData.PullRequest(), TestData.PullRequest(2)]);
-            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Combine(directory, "state.json")),
+            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Join(directory, "state.json")),
                 new Redactor(), TestData.AgeGate());
             var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
             Assert.AreEqual(1, services.Merges);

@@ -272,16 +272,13 @@ internal sealed partial class GitHubGateway : IGitHubGateway
             "-f", "owner=" + parts[0], "-f", "name=" + parts[1]], cancellationToken);
         if (releases.ExitCode != 0) return null;
         using var document = JsonDocument.Parse(releases.Output);
-        var dates = new List<DateTimeOffset>();
-        foreach (var release in document.RootElement.GetProperty("data").GetProperty("repository")
-            .GetProperty("releases").GetProperty("nodes").EnumerateArray())
-        {
-            if (release.TryGetProperty("tagCommit", out var tag) && tag.ValueKind == JsonValueKind.Object &&
-                Text(tag, "oid") == commit.Output.Trim() &&
-                release.GetProperty("publishedAt").ValueKind == JsonValueKind.String &&
-                release.GetProperty("publishedAt").TryGetDateTimeOffset(out var published)) dates.Add(published);
-        }
-        return dates.Count == 0 ? null : dates.Min();
+        return document.RootElement.GetProperty("data").GetProperty("repository").GetProperty("releases")
+            .GetProperty("nodes").EnumerateArray()
+            .Where(release => release.TryGetProperty("tagCommit", out var tag) && tag.ValueKind == JsonValueKind.Object &&
+                Text(tag, "oid") == commit.Output.Trim())
+            .Select(release => release.GetProperty("publishedAt").ValueKind == JsonValueKind.String &&
+                release.GetProperty("publishedAt").TryGetDateTimeOffset(out var published) ? published : (DateTimeOffset?)null)
+            .Min();
     }
 
     private Task<CommandResult> ExecuteAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken, string? input = null) =>

@@ -22,13 +22,13 @@ if (response.ExitCode != 0)
     return 1;
 }
 using var document = JsonDocument.Parse(response.Output);
-foreach (var artifact in document.RootElement.EnumerateArray()
+foreach (var run in document.RootElement.EnumerateArray()
     .SelectMany(page => page.GetProperty("artifacts").EnumerateArray())
     .Where(artifact => !artifact.GetProperty("expired").GetBoolean())
-    .OrderByDescending(artifact => artifact.GetProperty("created_at").GetDateTimeOffset()))
+    .OrderByDescending(artifact => artifact.GetProperty("created_at").GetDateTimeOffset())
+    .Select(artifact => artifact.GetProperty("workflow_run"))
+    .Where(run => run.GetProperty("head_branch").GetString() == branch))
 {
-    var run = artifact.GetProperty("workflow_run");
-    if (run.GetProperty("head_branch").GetString() != branch) continue;
     var id = run.GetProperty("id").GetRawText();
     var metadata = await ProcessRunner.RunAsync("gh",
         ["run", "view", id, "--repo", repository, "--json", "workflowName", "--jq", ".workflowName"]);

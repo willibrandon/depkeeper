@@ -176,7 +176,7 @@ internal sealed class MaintenanceRunner
                             "Nonblocking checks: " + string.Join(", ", advisory)));
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-                    catch (Exception exception)
+                    catch (Exception exception) when (FailurePolicy.CanReport(exception))
                     {
                         var reason = _redactor.Clean(exception.Message);
                         if (reason.Length > 1500) reason = reason[..1500];
@@ -185,14 +185,18 @@ internal sealed class MaintenanceRunner
                         {
                             _state.Set(current.Key, new AttemptState(current.Head, attempts, true, reason, _clock.GetUtcNow()));
                             try { await _github.CommentAsync(current, "Depkeeper stopped this repair: " + reason, cancellationToken); }
-                            catch (Exception commentError) when (commentError is IOException or InvalidOperationException) { }
+                            catch (Exception commentError) when (commentError is IOException or InvalidOperationException)
+                            {
+                                results.Add(new ReportEntry(repository, current.Number, "advisory",
+                                    "The PR comment could not be posted; the blocker is recorded in this report."));
+                            }
                         }
                     }
                 }
                 if (candidates.Count == 0) results.Add(new ReportEntry(repository, 0, "clear", "No open Dependabot PRs."));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (Exception exception)
+            catch (Exception exception) when (FailurePolicy.CanReport(exception))
             {
                 results.Add(new ReportEntry(repository, 0, "blocked", _redactor.Clean(exception.Message)));
             }

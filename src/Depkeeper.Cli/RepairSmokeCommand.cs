@@ -24,7 +24,7 @@ internal static class RepairSmokeCommand
         command.SetAction(async (result, cancellationToken) =>
         {
             var temporary = Directory.CreateTempSubdirectory("depkeeper-smoke-").FullName;
-            var directory = Path.Combine(temporary, "checkout");
+            var directory = Path.Join(temporary, "checkout");
             Directory.CreateDirectory(directory);
             var token = Environment.GetEnvironmentVariable("COPILOT_GITHUB_TOKEN");
             try
@@ -40,9 +40,9 @@ internal static class RepairSmokeCommand
                 if (initialization.ExitCode != 0) throw new IOException("Could not initialize the smoke fixture.");
                 const string test = "const t=require('node:test'),a=require('node:assert/strict'),sum=require('./sum.cjs');" +
                     "t('adds two numbers',()=>a.equal(sum(2,3),5));\n";
-                await File.WriteAllTextAsync(Path.Combine(directory, "sum.cjs"), "module.exports = (a, b) => a - b;\n",
+                await File.WriteAllTextAsync(Path.Join(directory, "sum.cjs"), "module.exports = (a, b) => a - b;\n",
                     cancellationToken);
-                await File.WriteAllTextAsync(Path.Combine(directory, "sum.test.cjs"), test, cancellationToken);
+                await File.WriteAllTextAsync(Path.Join(directory, "sum.test.cjs"), test, cancellationToken);
                 var redactor = new Redactor(token);
                 using var container = new ContainerRunner(directory, "node:24-bookworm", redactor);
                 var before = await container.RunAsync("node --test", cancellationToken);
@@ -56,14 +56,14 @@ internal static class RepairSmokeCommand
                 var summary = await repairer.RepairWorkspaceAsync(directory,
                     "Fix sum.cjs. Do not modify sum.test.cjs. Test output:\n" + before.Output + before.Error, container, timeout.Token);
                 var after = await container.RunAsync("node --test", cancellationToken);
-                var unchanged = await File.ReadAllTextAsync(Path.Combine(directory, "sum.test.cjs"), cancellationToken);
+                var unchanged = await File.ReadAllTextAsync(Path.Join(directory, "sum.test.cjs"), cancellationToken);
                 if (after.ExitCode != 0 || unchanged != test)
                     throw new InvalidOperationException("Live repair did not pass independent verification. " + summary +
                         "\nValidation: " + after.Output + after.Error);
                 await output.WriteLineAsync("Live repair passed: Copilot tool use, code repair, and independent verification.");
                 return 0;
             }
-            catch (Exception exception)
+            catch (Exception exception) when (FailurePolicy.CanReport(exception))
             {
                 await error.WriteLineAsync(new Redactor(token).Clean(exception.Message));
                 return 1;

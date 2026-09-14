@@ -38,10 +38,8 @@ internal sealed class WorkspacePolicy
             if (write && IsProtected(relative)) return false;
             for (var current = full; current != _root; current = Path.GetDirectoryName(current)!)
             {
-                if (File.Exists(current) || Directory.Exists(current))
-                {
-                    if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return false;
-                }
+                if ((File.Exists(current) || Directory.Exists(current)) &&
+                    (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return false;
             }
             return true;
         }
@@ -77,9 +75,9 @@ internal sealed class WorkspacePolicy
         using var right = JsonDocument.Parse(after);
         string[] dependencyFields =
             ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides", "resolutions"];
-        foreach (var property in left.RootElement.EnumerateObject())
+        foreach (var property in left.RootElement.EnumerateObject()
+            .Where(property => !dependencyFields.Contains(property.Name, StringComparer.Ordinal)))
         {
-            if (dependencyFields.Contains(property.Name, StringComparer.Ordinal)) continue;
             if (!right.RootElement.TryGetProperty(property.Name, out var value) || !JsonElement.DeepEquals(property.Value, value))
                 return false;
         }

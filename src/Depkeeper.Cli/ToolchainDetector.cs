@@ -27,7 +27,7 @@ internal static partial class ToolchainDetector
 
     private static ToolchainProfile? Detect(string directory)
     {
-        bool Has(string file) => File.Exists(Path.Combine(directory, file));
+        bool Has(string file) => File.Exists(Path.Join(directory, file));
         if (Has("package.json")) return Node(directory);
         var solutions = Directory.GetFiles(directory, "*.sln*").Where(path => path.EndsWith(".sln", StringComparison.Ordinal) ||
             path.EndsWith(".slnx", StringComparison.Ordinal)).ToArray();
@@ -40,7 +40,7 @@ internal static partial class ToolchainDetector
             var mtp = false;
             if (Has("global.json"))
             {
-                using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "global.json")),
+                using var json = JsonDocument.Parse(File.ReadAllText(Path.Join(directory, "global.json")),
                     new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
                 mtp = json.RootElement.TryGetProperty("test", out var test) && test.TryGetProperty("runner", out var runner) &&
                     runner.GetString() == "Microsoft.Testing.Platform";
@@ -84,11 +84,11 @@ internal static partial class ToolchainDetector
 
     private static ToolchainProfile Node(string directory)
     {
-        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "package.json")));
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Join(directory, "package.json")));
         if (!json.RootElement.TryGetProperty("scripts", out var scripts))
             throw new InvalidOperationException("Configure verification commands for this Node project.");
-        var manager = File.Exists(Path.Combine(directory, "pnpm-lock.yaml")) ? "pnpm" :
-            File.Exists(Path.Combine(directory, "yarn.lock")) ? "yarn" : "npm";
+        var manager = File.Exists(Path.Join(directory, "pnpm-lock.yaml")) ? "pnpm" :
+            File.Exists(Path.Join(directory, "yarn.lock")) ? "yarn" : "npm";
         var image = "node:24-trixie";
         if (json.RootElement.TryGetProperty("engines", out var engines) && engines.TryGetProperty("node", out var node) &&
             node.ValueKind == JsonValueKind.String && ExactVersion().IsMatch(node.GetString()!))
@@ -105,7 +105,7 @@ internal static partial class ToolchainDetector
         {
             "pnpm" => "corepack pnpm install --frozen-lockfile",
             "yarn" => "corepack yarn install --immutable",
-            _ => File.Exists(Path.Combine(directory, "package-lock.json")) ? "npm ci" : "npm install"
+            _ => File.Exists(Path.Join(directory, "package-lock.json")) ? "npm ci" : "npm install"
         };
         var run = manager == "npm" ? "npm run " : "corepack " + manager + " run ";
         var verify = scripts.TryGetProperty("check", out _) ? [run + "check"] :

@@ -23,6 +23,7 @@ jobs:
       - run: dotnet format --verify-no-changes --no-restore
       - run: >-
           dotnet format whitespace --folder --include scripts/setup-auth.cs scripts/restore-state.cs scripts/run-maintenance.cs
+          scripts/check-codeql.cs
           --verify-no-changes
       - run: dotnet build --configuration Release --no-restore
       - run: dotnet test --solution Depkeeper.slnx --configuration Release --no-build
@@ -30,3 +31,4 @@ jobs:
       - run: dotnet run --file scripts/setup-auth.cs -- --help
       - run: dotnet build scripts/restore-state.cs --configuration Release
       - run: dotnet build scripts/run-maintenance.cs --configuration Release
+      - run: dotnet build scripts/check-codeql.cs --configuration Release
