@@ -8,7 +8,7 @@
   },
   "profiles": {
     "OWNER/REPOSITORY": {
-      "image": "node:24-bookworm",
+      "image": "node:24-trixie",
       "install": ["npm ci"],
       "verify": ["npm test", "npm run build"],
       "requiredChecks": ["CI"],

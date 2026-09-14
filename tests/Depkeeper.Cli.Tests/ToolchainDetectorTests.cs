@@ -19,7 +19,7 @@ public sealed class ToolchainDetectorTests
                 {"engines":{"node":"24.19.0"},"packageManager":"npm@12.0.2","scripts":{"test":"node --test"}}
                 """);
             var detected = ToolchainDetector.Resolve(directory, new RepositoryProfile());
-            Assert.AreEqual("node:24.19.0-bookworm", detected.Image);
+            Assert.AreEqual("node:24.19.0-trixie", detected.Image);
             Assert.Contains("npm@12.0.2", detected.Install.First());
             Assert.AreEqual("npm install", detected.Install.Last());
             Assert.Contains("npm run test", detected.Verify);

@@ -89,10 +89,10 @@ internal static partial class ToolchainDetector
             throw new InvalidOperationException("Configure verification commands for this Node project.");
         var manager = File.Exists(Path.Combine(directory, "pnpm-lock.yaml")) ? "pnpm" :
             File.Exists(Path.Combine(directory, "yarn.lock")) ? "yarn" : "npm";
-        var image = "node:24-bookworm";
+        var image = "node:24-trixie";
         if (json.RootElement.TryGetProperty("engines", out var engines) && engines.TryGetProperty("node", out var node) &&
             node.ValueKind == JsonValueKind.String && ExactVersion().IsMatch(node.GetString()!))
-            image = "node:" + node.GetString() + "-bookworm";
+            image = "node:" + node.GetString() + "-trixie";
         var setup = new List<string>();
         if (json.RootElement.TryGetProperty("packageManager", out var packageManager) &&
             packageManager.ValueKind == JsonValueKind.String)
