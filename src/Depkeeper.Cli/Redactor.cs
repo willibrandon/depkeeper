@@ -24,13 +24,17 @@ internal sealed partial class Redactor
     internal string Clean(string value)
     {
         foreach (var secret in _secrets) value = value.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
-        return TerminalCodes().Replace(Tokens().Replace(value, "[REDACTED]"), string.Empty);
+        value = TerminalCodes().Replace(Tokens().Replace(value, "[REDACTED]"), string.Empty);
+        return ControlCharacters().Replace(value, string.Empty);
     }
 
     [GeneratedRegex(@"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|" +
         @"sk-(?:proj-|ant-)?[A-Za-z0-9_-]{24,}|https?://[^\s/@]+:[^\s/@]+@)", RegexOptions.CultureInvariant)]
     private static partial Regex Tokens();
 
-    [GeneratedRegex(@"\x1B\[[0-?]*[ -/]*[@-~]", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?:\x1B\[|\x9B|\uFFFD\[)[0-?]*[ -/]*[@-~]", RegexOptions.CultureInvariant)]
     private static partial Regex TerminalCodes();
+
+    [GeneratedRegex(@"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]", RegexOptions.CultureInvariant)]
+    private static partial Regex ControlCharacters();
 }

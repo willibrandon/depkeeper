@@ -22,5 +22,8 @@ public sealed class ReportingTests
         Assert.Contains("https://github.com/owner/repository/pull/1", report);
         Assert.DoesNotContain("\u001b[31m", redactor.Clean("\u001b[31mfailure\u001b[0m"));
         Assert.AreEqual("failure", redactor.Clean("\u001b[31mfailure\u001b[0m"));
+        Assert.AreEqual("failure", redactor.Clean("\ufffd[31mfailure\ufffd[0m"));
+        Assert.AreEqual("failure", redactor.Clean("\u009b31mfailure\u009b0m"));
+        Assert.AreEqual("failure", redactor.Clean("fail\u0007ure"));
     }
 }
