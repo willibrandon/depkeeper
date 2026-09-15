@@ -20,7 +20,7 @@ With the latest .NET 10 SDK and `gh` installed:
 
 ```sh
 dotnet run --file scripts/setup-auth.cs
-gh variable set DEPKEEPER_MODEL --body gpt-5.6-sol
+gh variable set DEPKEEPER_MODEL --body gpt-5.6-luna
 gh variable set DEPKEEPER_REPOSITORIES --body '["OWNER/REPOSITORY"]'
 ```
 
