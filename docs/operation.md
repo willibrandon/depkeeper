@@ -70,7 +70,7 @@ toolchain detection, redaction, and workspace containment. Normal CI uses no mod
 Run the **Live repair smoke** workflow, or run locally:
 
 ```sh
-dotnet run --project src/Depkeeper.Cli -- repair-smoke --model gpt-5.6-sol
+dotnet run --project src/Depkeeper.Cli -- repair-smoke --model gpt-5.6-luna
 ```
 
 This uses a real Copilot session on a disposable broken fixture, requires the original
