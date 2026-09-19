@@ -12,7 +12,7 @@ and reports blockers. It runs in GitHub Actions with your Copilot subscription.
 - Creates one bounded recovery PR when persistent post-merge CI can be repaired safely.
 - Remembers blocked revisions and limits repair attempts.
 - Applies a configurable publication cooldown, defaulting to three days.
-- Supports .NET, Node, Rust, Go, Python, JVM projects, and custom toolchains.
+- Supports .NET, Node, Rust, Go, Python, JVM, Elixir projects, and custom toolchains.
 
 ## Setup
 

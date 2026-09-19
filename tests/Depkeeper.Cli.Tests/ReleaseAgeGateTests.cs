@@ -81,6 +81,30 @@ public sealed class ReleaseAgeGateTests(TestContext testContext)
     }
 
     /// <summary>
+    /// Verifies every locked checksum of one version, so a second lock file cannot hide different content behind the first.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task VerifiesEachLockedChecksumOfTheSameVersion()
+    {
+        var genuine = new string('a', 64);
+        var changes = new DependencyChange[]
+        {
+            new("added", "hex", "mint", "1.10.1", [], genuine), new("added", "hex", "mint", "1.10.1", [], genuine),
+            new("added", "hex", "mint", "1.10.1", [], new string('b', 64))
+        };
+        var lookups = new List<string?>();
+        var gate = new ReleaseAgeGate((_, _) => Task.FromResult<IReadOnlyList<DependencyChange>>(changes), (dependency, _) =>
+        {
+            lookups.Add(dependency.Checksum);
+            return Task.FromResult<DateTimeOffset?>(dependency.Checksum == genuine ? DateTimeOffset.UtcNow.AddDays(-30) : null);
+        });
+        var blocker = await gate.GetBlockerAsync(TestData.PullRequest(), new ReleaseAgePolicy(), testContext.CancellationToken);
+        Assert.AreEqual("Publication date unavailable: hex/mint@1.10.1.", blocker);
+        Assert.HasCount(2, lookups);
+    }
+
+    /// <summary>
     /// Allows verified security remediation while ignoring security claims in the title.
     /// </summary>
     /// <returns>The test task.</returns>

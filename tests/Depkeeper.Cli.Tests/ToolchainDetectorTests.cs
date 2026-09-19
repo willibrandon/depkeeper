@@ -80,6 +80,7 @@ public sealed class ToolchainDetectorTests
     [DataRow("Package.swift", "swift")]
     [DataRow("composer.json", "php")]
     [DataRow("Gemfile", "ruby")]
+    [DataRow("mix.exs", "elixir")]
     public void DetectsProjectFamilies(string manifest, string expected)
     {
         var directory = Directory.CreateTempSubdirectory("depkeeper-toolchain-").FullName;
@@ -87,6 +88,66 @@ public sealed class ToolchainDetectorTests
         {
             File.WriteAllText(Path.Join(directory, manifest), string.Empty);
             Assert.AreEqual(expected, ToolchainDetector.Resolve(directory, new RepositoryProfile()).Name);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Bootstraps Hex and Rebar in the fresh container before fetching locked dependencies and running Mix tests.
+    /// </summary>
+    [TestMethod]
+    public void SelectsMixInstallationAndTests()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-toolchain-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Join(directory, "mix.exs"), string.Empty);
+            File.WriteAllText(Path.Join(directory, "mix.lock"), "%{}");
+            var detected = ToolchainDetector.Resolve(directory, new RepositoryProfile(Prepare: ["install-trusted-tool"]));
+            Assert.AreEqual("elixir:latest", detected.Image);
+            string[] install = ["install-trusted-tool", "mix local.hex --force", "mix local.rebar --force", "mix deps.get"];
+            CollectionAssert.AreEqual(install, detected.Install);
+            Assert.AreEqual("mix test", detected.Verify.Single());
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Keeps every previously detected manifest ahead of Mix so existing deployments select the same toolchain.
+    /// </summary>
+    /// <param name="manifest">A manifest that was already detected before Mix support.</param>
+    /// <param name="expected">The toolchain that must still be selected.</param>
+    [TestMethod]
+    [DataRow("Cargo.toml", "rust")]
+    [DataRow("pyproject.toml", "python")]
+    [DataRow("Gemfile", "ruby")]
+    public void ExistingManifestsKeepPrecedenceOverMix(string manifest, string expected)
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-toolchain-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Join(directory, manifest), string.Empty);
+            File.WriteAllText(Path.Join(directory, "mix.exs"), string.Empty);
+            Assert.AreEqual(expected, ToolchainDetector.Resolve(directory, new RepositoryProfile()).Name);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Lets a polyglot Mix repository replace detection with one explicit image and command set.
+    /// </summary>
+    [TestMethod]
+    public void ExplicitProfileReplacesMixDetection()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-toolchain-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Join(directory, "mix.exs"), string.Empty);
+            var custom = ToolchainDetector.Resolve(directory,
+                new RepositoryProfile("custom/elixir-node:latest", ["mix deps.get", "npm ci"], ["mix test", "npm run verify"]));
+            Assert.AreEqual("custom", custom.Name);
+            Assert.AreEqual("custom/elixir-node:latest", custom.Image);
+            Assert.Contains("npm run verify", custom.Verify);
         }
         finally { Directory.Delete(directory, true); }
     }

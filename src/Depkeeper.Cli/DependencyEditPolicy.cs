@@ -18,7 +18,7 @@ internal static class DependencyEditPolicy
         var path = filename.GetString()!;
         var name = Path.GetFileName(path).ToLowerInvariant();
         string[] names = ["package.json", "composer.json", "gemfile", "pom.xml", "go.mod", "go.sum", "package.swift",
-            "global.json", "project.json", "dotnet-tools.json", "makefile", ".npmrc", ".yarnrc"];
+            "global.json", "project.json", "dotnet-tools.json", "makefile", ".npmrc", ".yarnrc", "mix.exs"];
         string[] suffixes = [".lock", ".toml", ".csproj", ".fsproj", ".vbproj", ".props", ".targets", ".gemspec",
             ".nuspec", ".gradle", ".kts", ".sbt", ".zon", ".yaml", ".yml"];
         if (names.Contains(name, StringComparer.Ordinal) || suffixes.Any(suffix => name.EndsWith(suffix, StringComparison.Ordinal)) ||

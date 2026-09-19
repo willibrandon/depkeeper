@@ -65,7 +65,8 @@ inactivity period, no retained checkpoint means a fresh attempt history.
 ## Verification
 
 Unit tests cover merge gates, stale revisions, blocked-state persistence, cooldowns,
-toolchain detection, redaction, and workspace containment. Normal CI uses no model credits.
+lock-file comparison, registry verification, toolchain detection, redaction, and workspace
+containment. Normal CI uses no model credits.
 
 Run the **Live repair smoke** workflow, or run locally:
 
