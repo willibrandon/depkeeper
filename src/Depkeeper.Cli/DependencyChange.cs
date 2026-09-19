@@ -8,4 +8,6 @@ namespace Depkeeper.Cli;
 /// <param name="Name">The package name.</param>
 /// <param name="Version">The concrete package version.</param>
 /// <param name="Advisories">Known vulnerability identifiers associated with this version.</param>
-internal sealed record DependencyChange(string ChangeType, string Ecosystem, string Name, string Version, string[] Advisories);
+/// <param name="Checksum">The locked content checksum, when the lock file records one for registry verification.</param>
+internal sealed record DependencyChange(string ChangeType, string Ecosystem, string Name, string Version, string[] Advisories,
+    string? Checksum = null);

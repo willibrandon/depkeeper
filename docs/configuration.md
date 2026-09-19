@@ -39,10 +39,13 @@ is present. Explicit image overrides supply their own prerequisites.
 | `pyproject.toml`, `requirements.txt` | Virtual environment and pytest |
 | `pom.xml`, `gradlew` | Maven verify or Gradle check |
 | `Package.swift`, `composer.json`, `Gemfile` | Swift, Composer, or Bundler test commands |
+| `mix.exs` | Hex and Rebar setup, `mix deps.get`, and `mix test` |
 
-C/C++, Zig, platform-specific projects, and unconventional layouts use explicit
-profiles with a suitable image and commands. Full GitHub CI remains the final gate,
-including Windows/macOS, binding matrices, and remote-host checks.
+Detection reads the repository root and selects one toolchain; a manifest listed earlier
+takes precedence. C/C++, Zig, platform-specific projects, polyglot repositories, and
+unconventional layouts use explicit profiles with a suitable image and commands. Full
+GitHub CI remains the final gate, including Windows/macOS, binding matrices, and
+remote-host checks.
 
 ## Release age
 
@@ -57,8 +60,13 @@ exact release's earliest artifact upload from PyPI. GitHub Actions references ar
 GitHub releases by their actual commit. Docker Hub tags are accepted only when the full
 PR digest matches Docker Hub's current digest, then use `tag_last_pushed`. Unsupported
 MCR tags are accepted only when the full digest matches Microsoft's catalog record,
-then use its `lastModifiedDate`. Unsupported or unavailable metadata holds the update
-and is reported; Swift and private registries may require manual review.
+then use its `lastModifiedDate`. GitHub dependency review does not report Hex packages,
+so changed `mix.lock` files are compared at the exact base and head, including transitive
+entries. A Hex release is accepted only when hex.pm reports the same version and the locked
+outer checksum for a release that is not retired, then uses its `inserted_at`. Entries without
+an outer checksum, Git revisions, private or self-hosted Hex repositories, and a lock that
+cannot be read completely hold the update. Unsupported or unavailable metadata holds the
+update and is reported; Swift and private registries may require manual review.
 
 Verified security fixes can bypass the delay when GitHub reports a vulnerable package
 being replaced and no introduced version has known advisories. Labels and PR titles

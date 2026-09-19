@@ -80,6 +80,8 @@ internal static partial class ToolchainDetector
         if (Has("composer.json")) return new ToolchainProfile("php", "composer:latest", ["composer install --no-interaction"],
             ["composer test --no-interaction"]);
         if (Has("Gemfile")) return new ToolchainProfile("ruby", "ruby:latest", ["bundle install"], ["bundle exec rake test"]);
+        if (Has("mix.exs")) return new ToolchainProfile("elixir", "elixir:latest",
+            ["mix local.hex --force", "mix local.rebar --force", "mix deps.get"], ["mix test"]);
         return null;
     }
 

@@ -22,6 +22,10 @@ public sealed class DependencyEditPolicyTests
     [DataRow("scripts/setup.cs", "+#:package Example@1.0.0", false)]
     [DataRow("src/code.ts", "+import from https://example.com/new.js", false)]
     [DataRow("src/code.cs", null, false)]
+    [DataRow("lib/postern/server.ex", "+def add(a, b), do: a + b", true)]
+    [DataRow("mix.exs", "+      {:jason, \"~> 1.5\"},", false)]
+    [DataRow("apps/web/mix.exs", "+      {:jason, \"~> 1.5\"},", false)]
+    [DataRow("mix.lock", "+  \"jason\": {:hex, :jason, \"1.5.0\"},", false)]
     public void RequiresMetadataForPotentialDependencyEdits(string path, string? patch, bool codeOnly)
     {
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(new { filename = path, patch }));

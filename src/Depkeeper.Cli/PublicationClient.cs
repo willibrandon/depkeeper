@@ -12,6 +12,7 @@ internal sealed class PublicationClient
     private readonly Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? _actions;
     private readonly Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? _docker;
     private readonly Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? _pypi;
+    private readonly Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? _hex;
 
     /// <summary>
     /// Creates a publication reader without GitHub or model credentials.
@@ -20,15 +21,18 @@ internal sealed class PublicationClient
     /// <param name="actions">Optional GitHub Actions publication lookup.</param>
     /// <param name="docker">Optional Docker Hub digest publication lookup.</param>
     /// <param name="pypi">Optional exact PyPI publication lookup.</param>
+    /// <param name="hex">Optional checksum-verified Hex publication lookup.</param>
     internal PublicationClient(HttpClient client,
         Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? actions = null,
         Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? docker = null,
-        Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? pypi = null)
+        Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? pypi = null,
+        Func<DependencyChange, CancellationToken, Task<DateTimeOffset?>>? hex = null)
     {
         _client = client;
         _actions = actions;
         _docker = docker;
         _pypi = pypi;
+        _hex = hex;
     }
 
     /// <summary>
@@ -42,6 +46,7 @@ internal sealed class PublicationClient
         if (dependency.Ecosystem is "actions" or "githubactions" or "github-actions")
             return _actions is null ? null : await _actions(dependency, cancellationToken);
         if (dependency.Ecosystem == "docker") return _docker is null ? null : await _docker(dependency, cancellationToken);
+        if (dependency.Ecosystem == "hex") return _hex is null ? null : await _hex(dependency, cancellationToken);
         var system = dependency.Ecosystem.ToLowerInvariant() switch
         {
             "npm" => "NPM",

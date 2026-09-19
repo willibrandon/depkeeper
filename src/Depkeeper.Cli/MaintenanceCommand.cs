@@ -64,8 +64,9 @@ internal static class MaintenanceCommand
                 var docker = new DockerHubPublicationClient(http);
                 var mcr = new McrPublicationClient(http);
                 var pypi = new PyPiPublicationClient(http);
+                var hex = new HexPublicationClient(http);
                 var publications = new PublicationClient(http, gateway.GetActionPublicationAsync, DockerPublicationAsync,
-                    pypi.GetAsync);
+                    pypi.GetAsync, hex.GetAsync);
                 var ageGate = new ReleaseAgeGate(gateway.GetDependencyChangesAsync, publications.GetAsync,
                     codeOnly: gateway.IsCodeOnlyRecoveryAsync);
                 var controller = new MaintenanceRunner(gateway, repairer, store, redactor, ageGate);

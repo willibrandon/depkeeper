@@ -505,9 +505,11 @@ internal sealed partial class GitHubGateway : IGitHubGateway
                 directory = parent.Contains('/') ? parent[..(parent.LastIndexOf('/') + 1)] : string.Empty;
             }
         }
-        var dockerChanges = await GetDockerChangesAsync(pullRequest, cancellationToken);
-        var mavenChanges = await GetMavenChangesAsync(pullRequest, cancellationToken);
-        return changes.Concat(dockerChanges).Concat(mavenChanges).Distinct().ToArray();
+        var files = await GetPullRequestFilesAsync(pullRequest, cancellationToken);
+        var dockerChanges = await GetDockerChangesAsync(pullRequest, files, cancellationToken);
+        var mavenChanges = await GetMavenChangesAsync(pullRequest, files, cancellationToken);
+        var mixChanges = await GetMixChangesAsync(pullRequest, files, cancellationToken);
+        return changes.Concat(dockerChanges).Concat(mavenChanges).Concat(mixChanges).Distinct().ToArray();
     }
 
     /// <summary>
@@ -524,9 +526,8 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     }
 
     private async Task<IReadOnlyList<DependencyChange>> GetDockerChangesAsync(PullRequestSnapshot pullRequest,
-        CancellationToken cancellationToken)
+        JsonElement[] files, CancellationToken cancellationToken)
     {
-        var files = await GetPullRequestFilesAsync(pullRequest, cancellationToken);
         var changes = new List<DependencyChange>();
         foreach (var path in files.Select(file => Text(file, "filename")).Where(DockerDependencyParser.IsDockerfile))
         {
@@ -539,9 +540,8 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     }
 
     private async Task<IReadOnlyList<DependencyChange>> GetMavenChangesAsync(PullRequestSnapshot pullRequest,
-        CancellationToken cancellationToken)
+        JsonElement[] files, CancellationToken cancellationToken)
     {
-        var files = await GetPullRequestFilesAsync(pullRequest, cancellationToken);
         var changes = new List<DependencyChange>();
         foreach (var path in files.Select(file => Text(file, "filename"))
             .Where(path => Path.GetFileName(path).Equals("pom.xml", StringComparison.OrdinalIgnoreCase)))
@@ -550,6 +550,24 @@ internal sealed partial class GitHubGateway : IGitHubGateway
                 path, cancellationToken);
             var after = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.Head, path, cancellationToken);
             changes.AddRange(MavenDependencyParser.Compare(before, after));
+        }
+        return changes;
+    }
+
+    private async Task<IReadOnlyList<DependencyChange>> GetMixChangesAsync(PullRequestSnapshot pullRequest,
+        JsonElement[] files, CancellationToken cancellationToken)
+    {
+        var changes = new List<DependencyChange>();
+        foreach (var file in files.Where(file => MixLockParser.IsLockFile(Text(file, "filename"))))
+        {
+            var path = Text(file, "filename");
+            var before = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.BaseHead ?? pullRequest.BaseBranch,
+                path, cancellationToken);
+            var after = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.Head, path, cancellationToken);
+            // Dependency review omits Hex, so an unreadable head lock must hold the update rather than resemble a removal.
+            if (after is null && Text(file, "status") != "removed")
+                throw new IOException("A changed mix.lock file could not be read at the exact PR head.");
+            changes.AddRange(MixLockParser.Compare(before, after));
         }
         return changes;
     }
