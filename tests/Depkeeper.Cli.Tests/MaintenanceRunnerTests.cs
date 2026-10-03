@@ -234,6 +234,217 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
     }
 
     /// <summary>
+    /// Brings a Dependabot-owned branch up to date by asking Dependabot to rebase instead of pushing a merge commit.
+    /// </summary>
+    /// <param name="mergeState">GitHub's merge gate for the stale branch.</param>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    [DataRow("BEHIND")]
+    [DataRow("DIRTY")]
+    public async Task StaleDependabotBranchIsRebasedByDependabot(string mergeState)
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices();
+            services.PullRequests.Add(TestData.PullRequest() with { MergeState = mergeState, Mergeable = "CONFLICTING" });
+            services.OnComment = (_, _) => services.PullRequests[0] = TestData.PullRequest() with { Head = new string('b', 40) };
+            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Join(directory, "state.json")),
+                new Redactor(), TestData.AgeGate(), pollInterval: TimeSpan.Zero);
+            var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+            Assert.AreEqual("@dependabot rebase", services.CommentBodies.Single());
+            Assert.AreEqual(1, services.Merges);
+            Assert.AreEqual(0, services.Repairs);
+            Assert.AreEqual("merged", results.Single().Outcome);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Keeps merging the base into branches that carry a controller repair, which Dependabot would otherwise discard.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task RepairedBranchIsUpdatedWithoutAskingDependabot()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices { DependabotOwned = false };
+            services.PullRequests.Add(TestData.PullRequest() with { MergeState = "BEHIND" });
+            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Join(directory, "state.json")),
+                new Redactor(), TestData.AgeGate());
+            var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+            Assert.AreEqual("blocked", results.Single().Outcome);
+            Assert.Contains("could not update the branch", results.Single().Detail);
+            Assert.DoesNotContain("@dependabot rebase", services.CommentBodies);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Rechecks a blocked revision without a repair once its base moves, merging when the rebased head passes.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task BlockedRevisionIsRebasedAndRecheckedWhenBaseMoves()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices();
+            var pr = TestData.PullRequest() with
+            {
+                MergeState = "DIRTY",
+                Mergeable = "CONFLICTING",
+                BaseHead = new string('f', 40),
+                Checks = [new CheckSnapshot("tests", "FAILURE", "")]
+            };
+            services.PullRequests.Add(pr);
+            services.OnComment = (_, _) => services.PullRequests[0] = TestData.PullRequest() with { Head = new string('b', 40) };
+            var store = new StateStore(Path.Join(directory, "state.json"));
+            store.Set(pr.Key, new AttemptState(pr.Head, 1, true, "Independent validation failed.", DateTimeOffset.UtcNow,
+                BaseHead: new string('e', 40)));
+            var runner = new MaintenanceRunner(services, services, store, new Redactor(), TestData.AgeGate(), pollInterval: TimeSpan.Zero);
+            var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+            Assert.AreEqual("@dependabot rebase", services.CommentBodies.Single());
+            Assert.AreEqual(0, services.Repairs);
+            Assert.AreEqual(1, services.Merges);
+            Assert.AreEqual("merged", results.Single().Outcome);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Spends no repair on a rebased head that still fails, and keeps the earlier blocker visible.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task RebasedBlockedRevisionThatStillFailsIsNotRepaired()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices();
+            var pr = TestData.PullRequest() with
+            {
+                Head = new string('b', 40),
+                MergeState = "BLOCKED",
+                Checks = [new CheckSnapshot("tests", "FAILURE", "")]
+            };
+            services.PullRequests.Add(pr);
+            var path = Path.Join(directory, "state.json");
+            var store = new StateStore(path);
+            store.Set(pr.Key, new AttemptState(new string('a', 40), 1, true, "Independent validation failed.", DateTimeOffset.UtcNow,
+                BaseHead: pr.BaseHead, RebaseRequested: true));
+            var runner = new MaintenanceRunner(services, services, store, new Redactor(), TestData.AgeGate());
+            var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+            Assert.AreEqual(0, services.Repairs);
+            Assert.AreEqual("blocked", results.Single().Outcome);
+            Assert.Contains("Independent validation failed.", results.Single().Detail);
+            var saved = new StateStore(path).State.PullRequests[pr.Key];
+            Assert.AreEqual(pr.Head, saved.Head);
+            Assert.IsTrue(saved.Blocked);
+            Assert.AreEqual(1, saved.Attempts);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Leaves a blocked revision alone while its base is unchanged, even when the branch is stale.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task BlockedRevisionWithUnchangedBaseIsNotRebased()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices();
+            var pr = TestData.PullRequest() with { MergeState = "BEHIND", BaseHead = new string('e', 40) };
+            services.PullRequests.Add(pr);
+            var store = new StateStore(Path.Join(directory, "state.json"));
+            store.Set(pr.Key, new AttemptState(pr.Head, 1, true, "Independent validation failed.", DateTimeOffset.UtcNow,
+                BaseHead: pr.BaseHead));
+            var runner = new MaintenanceRunner(services, services, store, new Redactor(), TestData.AgeGate());
+            var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+            Assert.AreEqual("blocked", results.Single().Outcome);
+            Assert.AreEqual("Independent validation failed.", results.Single().Detail);
+            Assert.AreEqual(0, services.Comments);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Reports an unanswered rebase request as pending, asks only once per base, and escalates after a day.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task UnansweredRebaseRequestIsPendingThenEscalates()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices();
+            var pr = TestData.PullRequest() with { MergeState = "BEHIND", BaseHead = new string('e', 40) };
+            services.PullRequests.Add(pr);
+            var path = Path.Join(directory, "state.json");
+            var runner = new MaintenanceRunner(services, services, new StateStore(path), new Redactor(), TestData.AgeGate(),
+                pollInterval: TimeSpan.Zero);
+            var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+            Assert.AreEqual("pending", results.Single().Outcome);
+            var saved = new StateStore(path).State.PullRequests[pr.Key];
+            Assert.IsTrue(saved.RebaseRequested);
+            Assert.AreEqual(pr.BaseHead, saved.BaseHead);
+            runner = new MaintenanceRunner(services, services, new StateStore(path), new Redactor(), TestData.AgeGate(),
+                pollInterval: TimeSpan.Zero);
+            results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+            Assert.AreEqual("pending", results.Single().Outcome);
+            Assert.AreEqual(1, services.Comments);
+            var stale = new StateStore(path);
+            stale.Set(pr.Key, saved with { UpdatedAt = DateTimeOffset.UtcNow.AddDays(-2) });
+            runner = new MaintenanceRunner(services, services, stale, new Redactor(), TestData.AgeGate(), pollInterval: TimeSpan.Zero);
+            results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+            Assert.AreEqual("blocked", results.Single().Outcome);
+            Assert.Contains("Dependabot has not rebased", results.Single().Detail);
+            Assert.AreEqual(0, services.Merges);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Describes the pending branch update in inspection mode without posting a comment.
+    /// </summary>
+    /// <param name="owned">Whether Dependabot still owns the branch.</param>
+    /// <param name="blocked">Whether the revision was blocked against an earlier base.</param>
+    /// <param name="expected">The expected explanation.</param>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    [DataRow(true, false, "Ask Dependabot to rebase and rerun CI.")]
+    [DataRow(false, false, "Bring the branch up to date and rerun CI.")]
+    [DataRow(true, true, "The base changed since this revision was blocked. Ask Dependabot to rebase and rerun CI.")]
+    public async Task DryRunDescribesBranchUpdates(bool owned, bool blocked, string expected)
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices { DependabotOwned = owned };
+            var pr = TestData.PullRequest() with { MergeState = "BEHIND", BaseHead = new string('f', 40) };
+            services.PullRequests.Add(pr);
+            var store = new StateStore(Path.Join(directory, "state.json"));
+            if (blocked)
+                store.Set(pr.Key, new AttemptState(pr.Head, 1, true, "Independent validation failed.", DateTimeOffset.UtcNow,
+                    BaseHead: new string('e', 40)));
+            var runner = new MaintenanceRunner(services, services, store, new Redactor(), TestData.AgeGate());
+            var results = await runner.RunAsync(TestData.Settings(true), testContext.CancellationToken);
+            Assert.AreEqual("would-update", results.Single().Outcome);
+            Assert.AreEqual(expected, results.Single().Detail);
+            Assert.AreEqual(0, services.Comments);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
     /// Stops further mutations in a repository after merging one independently verified PR.
     /// </summary>
     /// <returns>The test task.</returns>

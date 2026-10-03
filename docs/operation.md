@@ -15,6 +15,11 @@ script when available.
 An existing npm `allowScripts` permission may follow an exact dependency version update
 only when its value is unchanged and no additional package receives permission.
 
+A Dependabot branch that is behind or conflicts with its base is brought up to date by
+asking Dependabot to rebase it. Depkeeper does not push merge commits onto Dependabot
+branches, because Dependabot stops rebasing a branch once another account pushes to it.
+Branches that already carry a Depkeeper repair are updated with a merge from the base.
+
 Before merging, it refreshes the PR, checks the exact revision, reevaluates publication
 age, and lets GitHub enforce branch rules. Missing, pending, failed, or unexpectedly
 skipped required checks prevent merging. Explicitly configured advisory failures are
@@ -52,7 +57,8 @@ created. Changes that may alter dependencies remain subject to publication-age p
   post-merge verification closes the corresponding managed issue. Pending CI and cooldowns do not open issues.
   `--report-repo OWNER/REPO` explicitly selects a central destination instead.
 - An unchanged blocked revision is not automatically attempted again. A new head or an
-  explicit `--retry-blocked` permits reconsideration.
+  explicit `--retry-blocked` permits reconsideration. When the base moves, a blocked
+  Dependabot branch is rebased and its CI rechecked without a new repair.
 - Exit `0` means the sweep completed; `2` means it reported blockers; `1` means a run-level
   failure. State and report artifacts remain available for inspection.
 

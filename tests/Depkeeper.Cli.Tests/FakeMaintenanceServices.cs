@@ -41,6 +41,21 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     internal int Comments { get; private set; }
 
     /// <summary>
+    /// Gets the bodies of comments published by the controller.
+    /// </summary>
+    internal List<string> CommentBodies { get; } = [];
+
+    /// <summary>
+    /// Gets or sets a callback that simulates Dependabot reacting to a posted comment.
+    /// </summary>
+    internal Action<PullRequestSnapshot, string>? OnComment { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the branch carries only Dependabot commits and merges from the base.
+    /// </summary>
+    internal bool DependabotOwned { get; set; } = true;
+
+    /// <summary>
     /// Gets the number of refresh requests.
     /// </summary>
     internal int Refreshes { get; private set; }
@@ -213,9 +228,14 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
         return Task.FromResult(created);
     }
 
+    Task<bool> IGitHubGateway.IsDependabotOwnedAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken) =>
+        Task.FromResult(DependabotOwned);
+
     Task IGitHubGateway.CommentAsync(PullRequestSnapshot pullRequest, string body, CancellationToken cancellationToken)
     {
         Comments++;
+        CommentBodies.Add(body);
+        OnComment?.Invoke(pullRequest, body);
         return Task.CompletedTask;
     }
 
