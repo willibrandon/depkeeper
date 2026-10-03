@@ -51,9 +51,9 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     internal Action<PullRequestSnapshot, string>? OnComment { get; set; }
 
     /// <summary>
-    /// Gets or sets whether the branch carries only Dependabot commits and merges from the base.
+    /// Gets or sets who contributed the commits on the fake branch.
     /// </summary>
-    internal bool DependabotOwned { get; set; } = true;
+    internal BranchOwnership Ownership { get; set; } = BranchOwnership.Dependabot;
 
     /// <summary>
     /// Gets the number of refresh requests.
@@ -228,8 +228,8 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
         return Task.FromResult(created);
     }
 
-    Task<bool> IGitHubGateway.IsDependabotOwnedAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken) =>
-        Task.FromResult(DependabotOwned);
+    Task<BranchOwnership> IGitHubGateway.GetBranchOwnershipAsync(PullRequestSnapshot pullRequest,
+        CancellationToken cancellationToken) => Task.FromResult(Ownership);
 
     Task IGitHubGateway.CommentAsync(PullRequestSnapshot pullRequest, string body, CancellationToken cancellationToken)
     {

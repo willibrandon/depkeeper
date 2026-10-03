@@ -270,7 +270,7 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
         var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
         try
         {
-            var services = new FakeMaintenanceServices { DependabotOwned = false };
+            var services = new FakeMaintenanceServices { Ownership = BranchOwnership.Foreign };
             services.PullRequests.Add(TestData.PullRequest() with { MergeState = "BEHIND" });
             var runner = new MaintenanceRunner(services, services, new StateStore(Path.Join(directory, "state.json")),
                 new Redactor(), TestData.AgeGate());
@@ -301,13 +301,14 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
                 Checks = [new CheckSnapshot("tests", "FAILURE", "")]
             };
             services.PullRequests.Add(pr);
+            services.Ownership = BranchOwnership.DependabotWithMerges;
             services.OnComment = (_, _) => services.PullRequests[0] = TestData.PullRequest() with { Head = new string('b', 40) };
             var store = new StateStore(Path.Join(directory, "state.json"));
             store.Set(pr.Key, new AttemptState(pr.Head, 1, true, "Independent validation failed.", DateTimeOffset.UtcNow,
                 BaseHead: new string('e', 40)));
             var runner = new MaintenanceRunner(services, services, store, new Redactor(), TestData.AgeGate(), pollInterval: TimeSpan.Zero);
             var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
-            Assert.AreEqual("@dependabot rebase", services.CommentBodies.Single());
+            Assert.AreEqual("@dependabot recreate", services.CommentBodies.Single());
             Assert.AreEqual(0, services.Repairs);
             Assert.AreEqual(1, services.Merges);
             Assert.AreEqual("merged", results.Single().Outcome);
@@ -485,7 +486,7 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
         var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
         try
         {
-            var services = new FakeMaintenanceServices { DependabotOwned = owned };
+            var services = new FakeMaintenanceServices { Ownership = owned ? BranchOwnership.Dependabot : BranchOwnership.Foreign };
             var pr = TestData.PullRequest() with { MergeState = "BEHIND", BaseHead = new string('f', 40) };
             services.PullRequests.Add(pr);
             var store = new StateStore(Path.Join(directory, "state.json"));
