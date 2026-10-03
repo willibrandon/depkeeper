@@ -503,6 +503,36 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
     }
 
     /// <summary>
+    /// Retires the recorded verdict of a PR that was closed without merging, and reports it so its issue can close.
+    /// </summary>
+    /// <param name="dryRun">Whether state writes are disabled.</param>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ClosedPullRequestRetiresItsBlockedState(bool dryRun)
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices();
+            var closed = TestData.PullRequest(2) with { State = "CLOSED", MergeState = "DIRTY", Mergeable = "CONFLICTING" };
+            services.PullRequests.AddRange([TestData.PullRequest(), closed]);
+            var path = Path.Join(directory, "state.json");
+            var store = new StateStore(path);
+            store.Set(closed.Key, new AttemptState(closed.Head, 1, true, "Independent validation failed.", DateTimeOffset.UtcNow));
+            var runner = new MaintenanceRunner(services, services, store, new Redactor(), TestData.AgeGate());
+            var results = await runner.RunAsync(TestData.Settings(dryRun), testContext.CancellationToken);
+            var retired = results.Single(entry => entry.Number == 2);
+            Assert.AreEqual("closed", retired.Outcome);
+            Assert.Contains("closed without merging", retired.Detail);
+            Assert.AreEqual(!dryRun, !new StateStore(path).State.PullRequests.ContainsKey(closed.Key));
+            Assert.AreEqual(0, services.Comments);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
     /// Stops further mutations in a repository after merging one independently verified PR.
     /// </summary>
     /// <returns>The test task.</returns>
