@@ -361,11 +361,12 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
         try
         {
             var services = new FakeMaintenanceServices();
+            // The PR's recorded base is stale by design; only the live branch tip decides whether the base moved.
             var pr = TestData.PullRequest() with { MergeState = "BEHIND", BaseHead = new string('e', 40) };
             services.PullRequests.Add(pr);
             var store = new StateStore(Path.Join(directory, "state.json"));
             store.Set(pr.Key, new AttemptState(pr.Head, 1, true, "Independent validation failed.", DateTimeOffset.UtcNow,
-                BaseHead: pr.BaseHead));
+                BaseHead: services.BaseHead));
             var runner = new MaintenanceRunner(services, services, store, new Redactor(), TestData.AgeGate());
             var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
             Assert.AreEqual("blocked", results.Single().Outcome);
@@ -395,7 +396,7 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
             Assert.AreEqual("pending", results.Single().Outcome);
             var saved = new StateStore(path).State.PullRequests[pr.Key];
             Assert.IsTrue(saved.RebaseRequested);
-            Assert.AreEqual(pr.BaseHead, saved.BaseHead);
+            Assert.AreEqual(services.BaseHead, saved.BaseHead);
             runner = new MaintenanceRunner(services, services, new StateStore(path), new Redactor(), TestData.AgeGate(),
                 pollInterval: TimeSpan.Zero);
             results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
@@ -408,6 +409,62 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
             Assert.AreEqual("blocked", results.Single().Outcome);
             Assert.Contains("Dependabot has not rebased", results.Single().Detail);
             Assert.AreEqual(0, services.Merges);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Waits for GitHub to finish recomputing mergeability before deciding whether a blocked revision is stale.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task BlockedRevisionWaitsForMergeabilityBeforeDeciding()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices();
+            var pr = TestData.PullRequest() with
+            {
+                MergeState = "UNKNOWN",
+                Mergeable = "UNKNOWN",
+                Checks = [new CheckSnapshot("tests", "FAILURE", "")]
+            };
+            services.PullRequests.Add(pr);
+            services.OnRefresh = (current, count) => count >= 3 && current.Head == pr.Head
+                ? current with { MergeState = "DIRTY", Mergeable = "CONFLICTING" } : current;
+            services.OnComment = (_, _) => services.PullRequests[0] = TestData.PullRequest() with { Head = new string('b', 40) };
+            var store = new StateStore(Path.Join(directory, "state.json"));
+            store.Set(pr.Key, new AttemptState(pr.Head, 1, true, "Independent validation failed.", DateTimeOffset.UtcNow,
+                BaseHead: new string('e', 40)));
+            var runner = new MaintenanceRunner(services, services, store, new Redactor(), TestData.AgeGate(), pollInterval: TimeSpan.Zero);
+            var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+            Assert.AreEqual("@dependabot rebase", services.CommentBodies.Single());
+            Assert.AreEqual("merged", results.Single().Outcome);
+            Assert.AreEqual(0, services.Repairs);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Records the live base tip with a blocked verdict so a later base move is detectable.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task BlockedVerdictRecordsTheLiveBaseTip()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices { BaseHead = new string('9', 40) };
+            var pr = TestData.PullRequest() with { MergeState = "BLOCKED", Checks = [new CheckSnapshot("tests", "FAILURE", "")] };
+            services.PullRequests.Add(pr);
+            var path = Path.Join(directory, "state.json");
+            var runner = new MaintenanceRunner(services, services, new StateStore(path), new Redactor(), TestData.AgeGate());
+            await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+            var saved = new StateStore(path).State.PullRequests[pr.Key];
+            Assert.IsTrue(saved.Blocked);
+            Assert.AreEqual(new string('9', 40), saved.BaseHead);
         }
         finally { Directory.Delete(directory, true); }
     }

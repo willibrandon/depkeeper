@@ -117,10 +117,15 @@ internal sealed class MaintenanceRunner
                     }
                     var reviewThreads = await _reviews.GetAsync(current, cancellationToken);
                     _state.State.PullRequests.TryGetValue(current.Key, out var earlier);
+                    // GitHub recomputes mergeability lazily after the base moves; a blocked verdict is not reaffirmed on a stale value.
+                    if (earlier is { Blocked: true }) current = await WaitForMergeabilityAsync(current, cancellationToken);
                     // A head that Dependabot produced at the controller's request inherits the blocked verdict's repair budget.
                     var rebasedBlocked = earlier is { RebaseRequested: true, Blocked: true } && earlier.Head != current.Head;
                     var previous = earlier?.Head == current.Head ? earlier : null;
-                    var baseMoved = previous?.Blocked == true && previous.BaseHead != current.BaseHead && NeedsRebase(current);
+                    // The PR's recorded base is only refreshed when its head moves, so the live branch tip tells whether the base moved.
+                    var baseTip = previous?.Blocked == true || NeedsRebase(current)
+                        ? await _github.GetBranchHeadAsync(repository, current.BaseBranch, cancellationToken) : null;
+                    var baseMoved = previous?.Blocked == true && previous.BaseHead != baseTip && NeedsRebase(current);
                     if (previous?.Blocked == true && !settings.RetryBlocked && !baseMoved &&
                         (MergePolicy.GetBlocker(current, current.Head, profile) is not null || reviewThreads.Count > 0))
                     {
@@ -141,7 +146,8 @@ internal sealed class MaintenanceRunner
                                     (owned ? "Ask Dependabot to rebase and rerun CI." : "Bring the branch up to date and rerun CI.")));
                                 continue;
                             }
-                            var updated = await BringUpToDateAsync(current, owned, previous, settings.CiTimeout, cancellationToken);
+                            var updated = await BringUpToDateAsync(current, owned, previous, baseTip!, settings.CiTimeout,
+                                cancellationToken);
                             if (!owned || updated is not null) mutated = true;
                             if (updated is null)
                             {
@@ -278,7 +284,7 @@ internal sealed class MaintenanceRunner
                         if (!settings.DryRun)
                         {
                             _state.Set(current.Key, new AttemptState(current.Head, attempts, true, reason, _clock.GetUtcNow(),
-                                BaseHead: current.BaseHead));
+                                BaseHead: await BaseTipAsync(repository, current, cancellationToken)));
                             try { await _github.CommentAsync(current, "Depkeeper stopped this repair: " + reason, cancellationToken); }
                             catch (Exception commentError) when (commentError is IOException or InvalidOperationException)
                             {
@@ -304,15 +310,32 @@ internal sealed class MaintenanceRunner
 
     private static bool NeedsRebase(PullRequestSnapshot pullRequest) => pullRequest.MergeState is "BEHIND" or "DIRTY";
 
+    private async Task<string?> BaseTipAsync(string repository, PullRequestSnapshot current, CancellationToken cancellationToken)
+    {
+        try { return await _github.GetBranchHeadAsync(repository, current.BaseBranch, cancellationToken); }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException) { return null; }
+    }
+
+    private async Task<PullRequestSnapshot> WaitForMergeabilityAsync(PullRequestSnapshot current, CancellationToken cancellationToken)
+    {
+        var deadline = _clock.GetUtcNow() + TimeSpan.FromMinutes(2);
+        while ((current.Mergeable == "UNKNOWN" || current.MergeState == "UNKNOWN") && _clock.GetUtcNow() < deadline)
+        {
+            await Task.Delay(_pollInterval, _clock, cancellationToken);
+            current = await _github.RefreshAsync(current, cancellationToken);
+        }
+        return current;
+    }
+
     private async Task<PullRequestSnapshot?> BringUpToDateAsync(PullRequestSnapshot current, bool dependabotOwned,
-        AttemptState? previous, TimeSpan timeout, CancellationToken cancellationToken)
+        AttemptState? previous, string baseTip, TimeSpan timeout, CancellationToken cancellationToken)
     {
         if (!dependabotOwned)
         {
             if (!await _github.UpdateBranchAsync(current, cancellationToken))
                 throw new InvalidOperationException("GitHub could not update the branch; resolve conflicts or permissions.");
         }
-        else if (previous is { RebaseRequested: true } && previous.BaseHead == current.BaseHead)
+        else if (previous is { RebaseRequested: true } && previous.BaseHead == baseTip)
         {
             if (previous.UpdatedAt + TimeSpan.FromDays(1) < _clock.GetUtcNow())
                 throw new InvalidOperationException(
@@ -323,7 +346,7 @@ internal sealed class MaintenanceRunner
             // Dependabot stops rebasing a branch once another account pushes to it, so the controller asks instead of merging.
             await _github.CommentAsync(current, "@dependabot rebase", cancellationToken);
             _state.Set(current.Key, new AttemptState(current.Head, previous?.Attempts ?? 0, previous?.Blocked ?? false,
-                previous?.Reason ?? "Waiting for Dependabot to rebase.", _clock.GetUtcNow(), BaseHead: current.BaseHead,
+                previous?.Reason ?? "Waiting for Dependabot to rebase.", _clock.GetUtcNow(), BaseHead: baseTip,
                 RebaseRequested: true));
         }
         var latest = await WaitAsync(current, timeout, true, cancellationToken);
