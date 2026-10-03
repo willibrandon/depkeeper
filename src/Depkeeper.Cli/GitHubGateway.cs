@@ -393,17 +393,16 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         using var document = JsonDocument.Parse(result.Output);
         var commits = document.RootElement.EnumerateArray().SelectMany(page => page.EnumerateArray()).ToArray();
         if (commits.Length == 0) return BranchOwnership.Foreign;
-        var merges = 0;
-        foreach (var commit in commits)
-        {
-            if (commit.TryGetProperty("author", out var author) && author.ValueKind == JsonValueKind.Object &&
-                Text(author, "login") == "dependabot[bot]") continue;
-            if (commit.TryGetProperty("parents", out var parents) && parents.ValueKind == JsonValueKind.Array &&
-                parents.GetArrayLength() > 1) merges++;
-            else return BranchOwnership.Foreign;
-        }
-        return merges == 0 ? BranchOwnership.Dependabot : BranchOwnership.DependabotWithMerges;
+        var foreign = commits.Where(commit => !IsAuthoredBy(commit, "dependabot[bot]")).ToArray();
+        if (foreign.Any(commit => !IsMerge(commit))) return BranchOwnership.Foreign;
+        return foreign.Length == 0 ? BranchOwnership.Dependabot : BranchOwnership.DependabotWithMerges;
     }
+
+    private static bool IsAuthoredBy(JsonElement commit, string login) =>
+        commit.TryGetProperty("author", out var author) && author.ValueKind == JsonValueKind.Object && Text(author, "login") == login;
+
+    private static bool IsMerge(JsonElement commit) =>
+        commit.TryGetProperty("parents", out var parents) && parents.ValueKind == JsonValueKind.Array && parents.GetArrayLength() > 1;
 
     /// <summary>
     /// Adds a sanitized comment to a pull request.
