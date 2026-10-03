@@ -55,7 +55,8 @@ created. Changes that may alter dependencies remain subject to publication-age p
 - The workflow restores the latest retained checkpoint and uploads it even after failures.
 - `.state/report.md` and the Actions summary show every outcome.
 - Actionable blockers open or update a managed issue in the affected repository. Successful
-  post-merge verification closes the corresponding managed issue. Pending CI and cooldowns do not open issues.
+  post-merge verification closes the corresponding managed issue, and so does a tracked PR that
+  is closed or merged without Depkeeper. Pending CI and cooldowns do not open issues.
   `--report-repo OWNER/REPO` explicitly selects a central destination instead.
 - An unchanged blocked revision is not automatically attempted again. A new head or an
   explicit `--retry-blocked` permits reconsideration. When the base moves, a blocked

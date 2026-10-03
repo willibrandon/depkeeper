@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Depkeeper.Cli;
 
 /// <summary>
@@ -296,6 +298,7 @@ internal sealed class MaintenanceRunner
                         }
                     }
                 }
+                results.AddRange(await RetireClosedAsync(repository, candidates, settings, cancellationToken));
                 if (candidates.Count == 0 && followups.Count == 0)
                     results.Add(new ReportEntry(repository, 0, "clear", "No open Dependabot PRs."));
             }
@@ -311,6 +314,35 @@ internal sealed class MaintenanceRunner
     }
 
     private static bool NeedsRebase(PullRequestSnapshot pullRequest) => pullRequest.MergeState is "BEHIND" or "DIRTY";
+
+    private async Task<IReadOnlyList<ReportEntry>> RetireClosedAsync(string repository, IReadOnlyList<PullRequestSnapshot> candidates,
+        RunSettings settings, CancellationToken cancellationToken)
+    {
+        // Dependabot closes a superseded PR instead of updating it, so a verdict recorded for it must not keep its issue open.
+        var results = new List<ReportEntry>();
+        var prefix = repository + "#";
+        var tracked = _state.State.PullRequests
+            .Where(pair => pair.Key.StartsWith(prefix, StringComparison.Ordinal) && pair.Value.MergeHead is null)
+            .Select(pair => (pair.Key, Number: int.TryParse(pair.Key.AsSpan(prefix.Length), CultureInfo.InvariantCulture, out var number)
+                ? number : 0))
+            .Where(entry => entry.Number > 0 && candidates.All(pr => pr.Number != entry.Number) &&
+                (settings.OnlyPullRequest is not int only || only == entry.Number))
+            .ToArray();
+        foreach (var (key, number) in tracked)
+        {
+            PullRequestSnapshot current;
+            try { current = await _github.RefreshAsync(PullRequestSnapshot.Lookup(repository, number), cancellationToken); }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException) { continue; }
+            if (current.State is not ("CLOSED" or "MERGED")) continue;
+            results.Add(new ReportEntry(repository, number, "closed", current.State == "MERGED"
+                ? "The PR was merged outside Depkeeper; its earlier blocker no longer applies."
+                : "The PR was closed without merging; its earlier blocker no longer applies."));
+            if (settings.DryRun) continue;
+            _state.State.PullRequests.Remove(key);
+            _state.Save();
+        }
+        return results;
+    }
 
     private async Task<string?> BaseTipAsync(string repository, PullRequestSnapshot current, CancellationToken cancellationToken)
     {

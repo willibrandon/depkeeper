@@ -57,6 +57,30 @@ public sealed class AttentionReportingTests(TestContext testContext)
     }
 
     /// <summary>
+    /// Closes the managed issue as not planned when the affected PR is closed without merging.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task ClosedPullRequestClosesItsManagedIssueAsNotPlanned()
+    {
+        var operations = new List<IReadOnlyList<string>>();
+        var gateway = new GitHubGateway("", new Redactor(), (arguments, _, _) =>
+        {
+            operations.Add(arguments);
+            return Task.FromResult(new CommandResult(0, """
+                [{"number":5,"title":"Depkeeper needs attention: owner/repository#1",
+                  "body":"<!-- depkeeper:owner/repository:1 -->"}]
+                """, ""));
+        });
+        await gateway.PublishAttentionAsync(new ReportEntry("owner/repository", 1, "closed",
+            "The PR was closed without merging; its earlier blocker no longer applies."), "auto", null, testContext.CancellationToken);
+        var close = operations.Single(arguments => arguments[1] == "close");
+        Assert.Contains("5", close);
+        Assert.Contains("not planned", close);
+        Assert.DoesNotContain(arguments => arguments[1] is "create" or "edit", operations);
+    }
+
+    /// <summary>
     /// Closes only the matching managed issue after the affected PR is independently merged.
     /// </summary>
     /// <returns>The test task.</returns>
