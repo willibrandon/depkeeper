@@ -380,6 +380,26 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     }
 
     /// <summary>
+    /// Reads the branch's commits and accepts only Dependabot authorship or merges from the base.
+    /// </summary>
+    /// <param name="pullRequest">The pull request to inspect.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>Whether a Dependabot rebase would discard nothing but merge commits.</returns>
+    public async Task<bool> IsDependabotOwnedAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken)
+    {
+        var result = await ExecuteAsync(["api", $"repos/{pullRequest.Repository}/pulls/{Number(pullRequest)}/commits?per_page=100",
+            "--paginate", "--slurp"], cancellationToken);
+        RequireSuccess(result);
+        using var document = JsonDocument.Parse(result.Output);
+        var commits = document.RootElement.EnumerateArray().SelectMany(page => page.EnumerateArray()).ToArray();
+        return commits.Length > 0 && commits.All(commit =>
+            commit.TryGetProperty("parents", out var parents) && parents.ValueKind == JsonValueKind.Array &&
+                parents.GetArrayLength() > 1 ||
+            commit.TryGetProperty("author", out var author) && author.ValueKind == JsonValueKind.Object &&
+                Text(author, "login") == "dependabot[bot]");
+    }
+
+    /// <summary>
     /// Adds a sanitized comment to a pull request.
     /// </summary>
     /// <param name="pullRequest">The pull request identity.</param>
