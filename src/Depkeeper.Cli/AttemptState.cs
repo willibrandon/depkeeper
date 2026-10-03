@@ -11,7 +11,7 @@ namespace Depkeeper.Cli;
 /// <param name="MergeHead">A merged commit whose post-merge verification is still tracked.</param>
 /// <param name="MergeBranch">The base branch to inspect for a verified follow-up fix.</param>
 /// <param name="Recovery">The bounded recovery PR associated with a failed merge.</param>
-/// <param name="BaseHead">The base revision observed when this state was recorded.</param>
+/// <param name="BaseHead">The base branch tip observed when this state was recorded.</param>
 /// <param name="RebaseRequested">Whether the controller asked Dependabot to rebase this revision onto <paramref name="BaseHead"/>.</param>
 internal sealed record AttemptState(string Head, int Attempts, bool Blocked, string Reason, DateTimeOffset UpdatedAt,
     string? MergeHead = null, string? MergeBranch = null, RecoveryState? Recovery = null, string? BaseHead = null,
