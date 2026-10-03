@@ -136,7 +136,9 @@ internal sealed class MaintenanceRunner
                     var attempts = settings.RetryBlocked ? 0 : previous?.Attempts ?? (rebasedBlocked ? earlier!.Attempts : 0);
                     try
                     {
-                        var owned = NeedsRebase(current) && await _github.IsDependabotOwnedAsync(current, cancellationToken);
+                        var ownership = NeedsRebase(current)
+                            ? await _github.GetBranchOwnershipAsync(current, cancellationToken) : BranchOwnership.Foreign;
+                        var owned = ownership != BranchOwnership.Foreign;
                         if (owned || current.MergeState == "BEHIND")
                         {
                             if (settings.DryRun)
@@ -146,7 +148,7 @@ internal sealed class MaintenanceRunner
                                     (owned ? "Ask Dependabot to rebase and rerun CI." : "Bring the branch up to date and rerun CI.")));
                                 continue;
                             }
-                            var updated = await BringUpToDateAsync(current, owned, previous, baseTip!, settings.CiTimeout,
+                            var updated = await BringUpToDateAsync(current, ownership, previous, baseTip!, settings.CiTimeout,
                                 cancellationToken);
                             if (!owned || updated is not null) mutated = true;
                             if (updated is null)
@@ -327,10 +329,10 @@ internal sealed class MaintenanceRunner
         return current;
     }
 
-    private async Task<PullRequestSnapshot?> BringUpToDateAsync(PullRequestSnapshot current, bool dependabotOwned,
+    private async Task<PullRequestSnapshot?> BringUpToDateAsync(PullRequestSnapshot current, BranchOwnership ownership,
         AttemptState? previous, string baseTip, TimeSpan timeout, CancellationToken cancellationToken)
     {
-        if (!dependabotOwned)
+        if (ownership == BranchOwnership.Foreign)
         {
             if (!await _github.UpdateBranchAsync(current, cancellationToken))
                 throw new InvalidOperationException("GitHub could not update the branch; resolve conflicts or permissions.");
@@ -344,7 +346,9 @@ internal sealed class MaintenanceRunner
         else
         {
             // Dependabot stops rebasing a branch once another account pushes to it, so the controller asks instead of merging.
-            await _github.CommentAsync(current, "@dependabot rebase", cancellationToken);
+            // It refuses to rebase over a merge from the base and must recreate the update instead.
+            await _github.CommentAsync(current,
+                ownership == BranchOwnership.Dependabot ? "@dependabot rebase" : "@dependabot recreate", cancellationToken);
             _state.Set(current.Key, new AttemptState(current.Head, previous?.Attempts ?? 0, previous?.Blocked ?? false,
                 previous?.Reason ?? "Waiting for Dependabot to rebase.", _clock.GetUtcNow(), BaseHead: baseTip,
                 RebaseRequested: true));

@@ -16,9 +16,10 @@ An existing npm `allowScripts` permission may follow an exact dependency version
 only when its value is unchanged and no additional package receives permission.
 
 A Dependabot branch that is behind or conflicts with its base is brought up to date by
-asking Dependabot to rebase it. Depkeeper does not push merge commits onto Dependabot
-branches, because Dependabot stops rebasing a branch once another account pushes to it.
-Branches that already carry a Depkeeper repair are updated with a merge from the base.
+asking Dependabot to rebase it, or to recreate it when the branch carries merges from the
+base. Depkeeper does not push merge commits onto Dependabot branches, because Dependabot
+stops rebasing a branch once another account pushes to it. Branches that already carry a
+Depkeeper repair are updated with a merge from the base.
 
 Before merging, it refreshes the PR, checks the exact revision, reevaluates publication
 age, and lets GitHub enforce branch rules. Missing, pending, failed, or unexpectedly

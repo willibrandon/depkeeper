@@ -121,12 +121,12 @@ internal interface IGitHubGateway
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Determines whether every commit on the branch is Dependabot's own work or a merge from the base.
+    /// Determines who contributed the commits on the branch.
     /// </summary>
     /// <param name="pullRequest">The pull request to inspect.</param>
     /// <param name="cancellationToken">Cancels retrieval.</param>
-    /// <returns>Whether Dependabot may rebase the branch without discarding a controller or human commit.</returns>
-    Task<bool> IsDependabotOwnedAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken);
+    /// <returns>Whether Dependabot can rebase or recreate the branch without discarding a controller or human commit.</returns>
+    Task<BranchOwnership> GetBranchOwnershipAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken);
 
     /// <summary>
     /// Publishes an actionable outcome on a pull request.

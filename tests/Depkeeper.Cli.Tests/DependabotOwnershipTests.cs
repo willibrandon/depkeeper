@@ -8,19 +8,21 @@ namespace Depkeeper.Cli.Tests;
 public sealed class DependabotOwnershipTests(TestContext testContext)
 {
     /// <summary>
-    /// Accepts Dependabot commits and merges from the base, and rejects repair commits, foreign commits, and empty branches.
+    /// Separates pristine Dependabot branches, branches with merges from the base, and branches carrying foreign commits.
     /// </summary>
     /// <param name="commits">The commits GitHub reports for the branch.</param>
-    /// <param name="expected">Whether the branch is Dependabot-owned.</param>
+    /// <param name="expected">The expected ownership name.</param>
     /// <returns>The test task.</returns>
     [TestMethod]
-    [DataRow("""[{"author":{"login":"dependabot[bot]"},"parents":[{}]}]""", true)]
-    [DataRow("""[{"author":{"login":"dependabot[bot]"},"parents":[{}]},{"author":{"login":"willibrandon"},"parents":[{},{}]}]""", true)]
+    [DataRow("""[{"author":{"login":"dependabot[bot]"},"parents":[{}]}]""", "Dependabot")]
+    [DataRow("""[{"author":{"login":"dependabot[bot]"},"parents":[{},{}]}]""", "Dependabot")]
+    [DataRow("""[{"author":{"login":"dependabot[bot]"},"parents":[{}]},{"author":{"login":"willibrandon"},"parents":[{},{}]}]""",
+        "DependabotWithMerges")]
     [DataRow("""[{"author":{"login":"dependabot[bot]"},"parents":[{}]},{"author":{"login":"github-actions[bot]"},"parents":[{}]}]""",
-        false)]
-    [DataRow("""[{"author":null,"parents":[{}]}]""", false)]
-    [DataRow("[]", false)]
-    public async Task RecognizesDependabotOwnedBranches(string commits, bool expected)
+        "Foreign")]
+    [DataRow("""[{"author":null,"parents":[{}]}]""", "Foreign")]
+    [DataRow("[]", "Foreign")]
+    public async Task ClassifiesBranchOwnership(string commits, string expected)
     {
         var requests = new List<string>();
         var gateway = new GitHubGateway("", new Redactor(), (arguments, _, _) =>
@@ -28,7 +30,8 @@ public sealed class DependabotOwnershipTests(TestContext testContext)
             requests.Add(arguments[1]);
             return Task.FromResult(new CommandResult(0, "[" + commits + "]", ""));
         });
-        Assert.AreEqual(expected, await gateway.IsDependabotOwnedAsync(TestData.PullRequest(), testContext.CancellationToken));
+        Assert.AreEqual(Enum.Parse<BranchOwnership>(expected),
+            await gateway.GetBranchOwnershipAsync(TestData.PullRequest(), testContext.CancellationToken));
         Assert.ContainsSingle(endpoint => endpoint.StartsWith("repos/owner/repository/pulls/1/commits", StringComparison.Ordinal),
             requests);
     }
