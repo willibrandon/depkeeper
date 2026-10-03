@@ -58,10 +58,13 @@ internal sealed class PublicationClient
             _ => null
         };
         if (system is null) return null;
-        var key = $"{system}/{dependency.Name}/{dependency.Version}";
+        // GitHub reports Go module versions without the leading v that the Go ecosystem and deps.dev use.
+        var version = system == "GO" && dependency.Version.Length > 0 && char.IsAsciiDigit(dependency.Version[0])
+            ? "v" + dependency.Version : dependency.Version;
+        var key = $"{system}/{dependency.Name}/{version}";
         if (_cache.TryGetValue(key, out var cached)) return cached;
         var url = $"https://api.deps.dev/v3/systems/{system}/packages/{Uri.EscapeDataString(dependency.Name)}/versions/" +
-            Uri.EscapeDataString(dependency.Version);
+            Uri.EscapeDataString(version);
         using var response = await _client.GetAsync(url, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             return _cache[key] = await GetPyPiFallbackAsync(system, dependency, cancellationToken);
