@@ -497,9 +497,8 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         var comparison = Uri.EscapeDataString(baseHead + "..." + pullRequest.Head);
         var result = await ExecuteAsync(["api", $"repos/{pullRequest.Repository}/dependency-graph/compare/{comparison}"],
             cancellationToken);
-        RequireSuccess(result);
-        using var document = JsonDocument.Parse(result.Output);
-        var values = document.RootElement.EnumerateArray().ToArray();
+        using var document = result.ExitCode == 0 ? JsonDocument.Parse(result.Output) : null;
+        var values = document?.RootElement.EnumerateArray().ToArray() ?? [];
         var changes = values.Select(value => new DependencyChange(Text(value, "change_type"),
             Text(value, "ecosystem"), Text(value, "name"), Text(value, "version"),
             value.GetProperty("vulnerabilities").EnumerateArray().Select(item => Text(item, "advisory_ghsa_id")).ToArray())).ToArray();
@@ -532,10 +531,14 @@ internal sealed partial class GitHubGateway : IGitHubGateway
             }
         }
         var files = await GetPullRequestFilesAsync(pullRequest, cancellationToken);
+        var npmChanges = result.ExitCode != 0 || changes.Length == 0
+            ? await GetNpmChangesAsync(pullRequest, files, cancellationToken) : [];
         var dockerChanges = await GetDockerChangesAsync(pullRequest, files, cancellationToken);
         var mavenChanges = await GetMavenChangesAsync(pullRequest, files, cancellationToken);
         var mixChanges = await GetMixChangesAsync(pullRequest, files, cancellationToken);
-        return changes.Concat(dockerChanges).Concat(mavenChanges).Concat(mixChanges).Distinct().ToArray();
+        var fallbacks = npmChanges.Concat(dockerChanges).Concat(mavenChanges).Concat(mixChanges).Distinct().ToArray();
+        if (result.ExitCode != 0 && fallbacks.Length == 0) RequireSuccess(result);
+        return changes.Concat(fallbacks).Distinct().ToArray();
     }
 
     /// <summary>
@@ -561,6 +564,23 @@ internal sealed partial class GitHubGateway : IGitHubGateway
                 path, cancellationToken);
             var after = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.Head, path, cancellationToken);
             changes.AddRange(DockerDependencyParser.Compare(before, after));
+        }
+        return changes;
+    }
+
+    private async Task<IReadOnlyList<DependencyChange>> GetNpmChangesAsync(PullRequestSnapshot pullRequest,
+        JsonElement[] files, CancellationToken cancellationToken)
+    {
+        var changes = new List<DependencyChange>();
+        foreach (var file in files.Where(file => Path.GetFileName(Text(file, "filename")) == "package-lock.json"))
+        {
+            var path = Text(file, "filename");
+            var before = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.BaseHead ?? pullRequest.BaseBranch,
+                path, cancellationToken);
+            var after = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.Head, path, cancellationToken);
+            if (after is null && Text(file, "status") != "removed")
+                throw new IOException("A changed package-lock.json file could not be read at the exact PR head.");
+            changes.AddRange(NpmLockParser.Compare(before, after));
         }
         return changes;
     }

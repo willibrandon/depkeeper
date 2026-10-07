@@ -81,21 +81,75 @@ internal sealed class WorkspacePolicy
     /// <param name="after">The manifest after repair.</param>
     /// <returns>Whether controller-selected commands and package identity remain intact.</returns>
     internal static bool PreservesManifest(string before, string after)
+        => ChangedProtectedManifestFields(before, after).Count == 0;
+
+    /// <summary>
+    /// Lists protected npm manifest fields changed outside dependency declarations.
+    /// </summary>
+    /// <param name="before">The manifest before repair.</param>
+    /// <param name="after">The manifest after repair.</param>
+    /// <returns>The changed protected field names.</returns>
+    internal static IReadOnlyList<string> ChangedProtectedManifestFields(string before, string after)
     {
         using var left = JsonDocument.Parse(before);
         using var right = JsonDocument.Parse(after);
         string[] dependencyFields =
             ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides", "resolutions"];
+        var changed = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in left.RootElement.EnumerateObject()
             .Where(property => property.Name != "allowScripts" &&
-                !dependencyFields.Contains(property.Name, StringComparer.Ordinal)))
-        {
-            if (!right.RootElement.TryGetProperty(property.Name, out var value) || !JsonElement.DeepEquals(property.Value, value))
-                return false;
-        }
-        return right.RootElement.EnumerateObject().All(property => dependencyFields.Contains(property.Name, StringComparer.Ordinal) ||
-            left.RootElement.TryGetProperty(property.Name, out _)) && PreservesAllowedScripts(left.RootElement, right.RootElement);
+                !dependencyFields.Contains(property.Name, StringComparer.Ordinal))
+            .Where(property => !right.RootElement.TryGetProperty(property.Name, out var value) ||
+                !JsonElement.DeepEquals(property.Value, value))) changed.Add(property.Name);
+        foreach (var property in right.RootElement.EnumerateObject().Where(property =>
+            !dependencyFields.Contains(property.Name, StringComparer.Ordinal) &&
+            !left.RootElement.TryGetProperty(property.Name, out _))) changed.Add(property.Name);
+        if (!PreservesAllowedScripts(left.RootElement, right.RootElement)) changed.Add("allowScripts");
+        return changed.Order(StringComparer.Ordinal).ToArray();
     }
+
+    /// <summary>
+    /// Lists direct dependency updates from the PR head that a repair no longer preserves.
+    /// </summary>
+    /// <param name="baseline">The package manifest on the PR base.</param>
+    /// <param name="expected">The original Dependabot package manifest.</param>
+    /// <param name="candidate">The repaired package manifest.</param>
+    /// <returns>The reverted dependency field and package names.</returns>
+    internal static IReadOnlyList<string> RevertedDependencyUpdates(string baseline, string expected, string candidate)
+    {
+        using var oldDocument = JsonDocument.Parse(baseline);
+        using var expectedDocument = JsonDocument.Parse(expected);
+        using var candidateDocument = JsonDocument.Parse(candidate);
+        string[] fields =
+            ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides", "resolutions"];
+        var reverted = new List<string>();
+        foreach (var field in fields)
+        {
+            var oldValues = Properties(oldDocument.RootElement, field);
+            var expectedValues = Properties(expectedDocument.RootElement, field);
+            var candidateValues = Properties(candidateDocument.RootElement, field);
+            var updates = oldValues.Keys.Concat(expectedValues.Keys).Distinct(StringComparer.Ordinal)
+                .Select(name => (Name: name, Old: oldValues.GetValueOrDefault(name),
+                    Expected: expectedValues.GetValueOrDefault(name)))
+                .Where(update => !Same(update.Old, update.Expected));
+            foreach (var (name, _, expectedValue) in updates)
+            {
+                candidateValues.TryGetValue(name, out var candidateValue);
+                if (!Same(expectedValue, candidateValue)) reverted.Add(field + "." + name);
+            }
+        }
+        return reverted.Order(StringComparer.Ordinal).ToArray();
+    }
+
+    private static Dictionary<string, JsonElement> Properties(JsonElement manifest, string field) =>
+        manifest.TryGetProperty(field, out var value) && value.ValueKind == JsonValueKind.Object
+            ? value.EnumerateObject().ToDictionary(property => property.Name, property => property.Value, StringComparer.Ordinal)
+            : [];
+
+    private static bool Same(JsonElement left, JsonElement right) =>
+        left.ValueKind == JsonValueKind.Undefined && right.ValueKind == JsonValueKind.Undefined ||
+        left.ValueKind != JsonValueKind.Undefined && right.ValueKind != JsonValueKind.Undefined &&
+        JsonElement.DeepEquals(left, right);
 
     private static bool PreservesAllowedScripts(JsonElement before, JsonElement after)
     {
