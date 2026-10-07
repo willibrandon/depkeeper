@@ -111,12 +111,6 @@ internal sealed class MaintenanceRunner
                     var current = await _github.RefreshAsync(candidate, cancellationToken);
                     if (!MergePolicy.IsEligible(current)) continue;
                     var agePolicy = profile.ReleaseAge ?? settings.ReleaseAge ?? new ReleaseAgePolicy();
-                    var ageBlocker = await _releaseAge.GetBlockerAsync(current, agePolicy, cancellationToken);
-                    if (ageBlocker is not null)
-                    {
-                        results.Add(new ReportEntry(repository, current.Number, "cooldown", ageBlocker));
-                        continue;
-                    }
                     var reviewThreads = await _reviews.GetAsync(current, cancellationToken);
                     _state.State.PullRequests.TryGetValue(current.Key, out var earlier);
                     // GitHub recomputes mergeability lazily after the base moves; a blocked verdict is not reaffirmed on a stale value.
@@ -152,7 +146,7 @@ internal sealed class MaintenanceRunner
                             }
                             var updated = await BringUpToDateAsync(current, ownership, previous, baseTip!, settings.CiTimeout,
                                 cancellationToken);
-                            if (!owned || updated is not null) mutated = true;
+                            mutated = true;
                             if (updated is null)
                             {
                                 results.Add(new ReportEntry(repository, current.Number, "pending",
@@ -160,6 +154,13 @@ internal sealed class MaintenanceRunner
                                 continue;
                             }
                             current = updated;
+                            reviewThreads = await _reviews.GetAsync(current, cancellationToken);
+                        }
+                        var ageBlocker = await _releaseAge.GetBlockerAsync(current, agePolicy, cancellationToken);
+                        if (ageBlocker is not null)
+                        {
+                            results.Add(new ReportEntry(repository, current.Number, "cooldown", ageBlocker));
+                            continue;
                         }
                         if (settings.DryRun)
                         {
@@ -243,6 +244,29 @@ internal sealed class MaintenanceRunner
                         }
                         var verifiedHead = current.Head;
                         current = await _github.RefreshAsync(current, cancellationToken);
+                        if (current.Head == verifiedHead && NeedsRebase(current))
+                        {
+                            var finalOwnership = await _github.GetBranchOwnershipAsync(current, cancellationToken);
+                            var liveBase = await _github.GetBranchHeadAsync(repository, current.BaseBranch, cancellationToken);
+                            var updated = await BringUpToDateAsync(current, finalOwnership, previous, liveBase, settings.CiTimeout,
+                                cancellationToken);
+                            mutated = true;
+                            if (updated is null)
+                            {
+                                results.Add(new ReportEntry(repository, current.Number, "pending",
+                                    finalOwnership == BranchOwnership.Foreign ? "Waiting for the updated branch." :
+                                        "Waiting for Dependabot to rebase the branch."));
+                                continue;
+                            }
+                            current = updated;
+                            verifiedHead = current.Head;
+                            if (!MergePolicy.ChecksFinished(current) || MergePolicy.HasFailure(current, profile))
+                            {
+                                results.Add(new ReportEntry(repository, current.Number, "pending",
+                                    "The branch was updated after final verification; reassess its CI next run."));
+                                continue;
+                            }
+                        }
                         reviewThreads = await _reviews.GetAsync(current, cancellationToken);
                         if (reviewThreads.Count > 0)
                         {

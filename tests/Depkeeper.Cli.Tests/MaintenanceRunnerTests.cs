@@ -261,6 +261,67 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
     }
 
     /// <summary>
+    /// Updates a stale Dependabot branch before evaluating publication metadata for its refreshed dependency revision.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task StaleBranchIsUpdatedBeforePublicationAgeCheck()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices();
+            var original = TestData.PullRequest() with { MergeState = "BEHIND" };
+            var updatedHead = new string('b', 40);
+            services.PullRequests.Add(original);
+            services.OnComment = (_, _) => services.PullRequests[0] = TestData.PullRequest() with { Head = updatedHead };
+            var inspectedHeads = new List<string>();
+            var age = new ReleaseAgeGate((pullRequest, _) =>
+            {
+                inspectedHeads.Add(pullRequest.Head);
+                return Task.FromResult<IReadOnlyList<DependencyChange>>([new("added", "npm", "example", "2.0.0", [])]);
+            }, (_, _) => Task.FromResult<DateTimeOffset?>(DateTimeOffset.UtcNow.AddDays(-30)));
+            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Join(directory, "state.json")),
+                new Redactor(), age, pollInterval: TimeSpan.Zero);
+
+            var results = await runner.RunAsync(TestData.Settings() with { ReleaseAge = new ReleaseAgePolicy() },
+                testContext.CancellationToken);
+
+            Assert.AreEqual("merged", results.Single().Outcome);
+            Assert.IsNotEmpty(inspectedHeads);
+            Assert.IsTrue(inspectedHeads.All(head => head == updatedHead));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Reuses the branch-update path when GitHub reports a base movement only during final verification.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task FinalRefreshBehindStateIsUpdatedBeforeMerge()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices();
+            var original = TestData.PullRequest();
+            services.PullRequests.Add(original);
+            services.OnRefresh = (current, count) => count == 2 ? current with { MergeState = "BEHIND" } : current;
+            services.OnComment = (_, _) => services.PullRequests[0] = TestData.PullRequest() with { Head = new string('b', 40) };
+            var runner = new MaintenanceRunner(services, services, new StateStore(Path.Join(directory, "state.json")),
+                new Redactor(), TestData.AgeGate(), pollInterval: TimeSpan.Zero);
+
+            var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+
+            Assert.AreEqual("@dependabot rebase", services.CommentBodies.Single());
+            Assert.AreEqual(1, services.Merges);
+            Assert.AreEqual("merged", results.Single().Outcome);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
     /// Keeps merging the base into branches that carry a controller repair, which Dependabot would otherwise discard.
     /// </summary>
     /// <returns>The test task.</returns>
