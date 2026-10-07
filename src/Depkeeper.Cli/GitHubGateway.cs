@@ -221,17 +221,18 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     {
         var revision = Uri.EscapeDataString(commit);
         var checks = new List<CheckSnapshot>();
+        var runs = await ReadPagesAsync($"repos/{repository}/actions/runs?head_sha={revision}&per_page=100",
+            "workflow_runs", cancellationToken);
+        var runEvents = runs.ToDictionary(run => run.GetProperty("id").GetRawText(), run => Text(run, "event"),
+            StringComparer.Ordinal);
         var jobs = await ReadPagesAsync($"repos/{repository}/commits/{revision}/check-runs?filter=latest&per_page=100",
             "check_runs", cancellationToken);
-        checks.AddRange(jobs.Where(job => !job.TryGetProperty("app", out var app) || app.ValueKind != JsonValueKind.Object ||
-            Text(app, "slug") != "dependabot").Select(job => new CheckSnapshot(Text(job, "name"),
+        checks.AddRange(jobs.Where(job => IsVerificationCheckRun(job, runEvents)).Select(job => new CheckSnapshot(Text(job, "name"),
             Text(job, "status") == "completed" ? Text(job, "conclusion").ToUpperInvariant() : Text(job, "status").ToUpperInvariant(),
             Text(job, "html_url"))));
         var statuses = await ReadPagesAsync($"repos/{repository}/commits/{revision}/status?per_page=100", "statuses", cancellationToken);
         checks.AddRange(statuses.Select(status => new CheckSnapshot(Text(status, "context"),
             Text(status, "state").ToUpperInvariant(), Text(status, "target_url"))));
-        var runs = await ReadPagesAsync($"repos/{repository}/actions/runs?head_sha={revision}&per_page=100",
-            "workflow_runs", cancellationToken);
         checks.AddRange(runs.Where(run => Text(run, "event") is "push" or "workflow_run")
             .GroupBy(run => run.GetProperty("workflow_id").GetInt64())
             .Select(group => group.MaxBy(run => run.GetProperty("id").GetInt64()))
@@ -239,6 +240,15 @@ internal sealed partial class GitHubGateway : IGitHubGateway
                 Text(run, "status") == "completed" ? Text(run, "conclusion").ToUpperInvariant() : Text(run, "status").ToUpperInvariant(),
                 Text(run, "html_url"))));
         return checks;
+    }
+
+    private static bool IsVerificationCheckRun(JsonElement job, Dictionary<string, string> runEvents)
+    {
+        if (job.TryGetProperty("app", out var app) && app.ValueKind == JsonValueKind.Object &&
+            Text(app, "slug") == "dependabot") return false;
+        var match = RunUrl().Match(Text(job, "html_url"));
+        return !match.Success || !runEvents.TryGetValue(match.Groups[1].Value, out var runEvent) ||
+            runEvent is "push" or "workflow_run";
     }
 
     private async Task<JsonElement[]> ReadPagesAsync(string endpoint, string field, CancellationToken cancellationToken)

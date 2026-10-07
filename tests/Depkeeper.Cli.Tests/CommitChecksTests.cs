@@ -57,6 +57,43 @@ public sealed class CommitChecksTests(TestContext testContext)
     }
 
     /// <summary>
+    /// Excludes GitHub's dynamic Dependabot updater jobs while retaining push-triggered verification jobs.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task DynamicDependabotUpdaterChecksAreNotVerification()
+    {
+        var gateway = new GitHubGateway("", new Redactor(), (arguments, _, _) =>
+        {
+            var body = arguments[1].Contains("check-runs", StringComparison.Ordinal) ? """
+                [{"check_runs":[
+                  {"name":"Dependabot","status":"completed","conclusion":"failure","app":{"slug":"github-actions"},
+                   "html_url":"https://github.com/owner/repository/actions/runs/20/job/200"},
+                  {"name":"build","status":"completed","conclusion":"success","app":{"slug":"github-actions"},
+                   "html_url":"https://github.com/owner/repository/actions/runs/10/job/100"}
+                ]}]
+                """ : arguments[1].Contains("/status?", StringComparison.Ordinal) ? """
+                [{"statuses":[]}]
+                """ : """
+                [{"workflow_runs":[
+                  {"id":10,"workflow_id":1,"name":"CI","event":"push","status":"completed","conclusion":"success",
+                   "html_url":"https://github.com/owner/repository/actions/runs/10"},
+                  {"id":20,"workflow_id":null,"name":"Dependabot Updates","event":"dynamic","status":"completed",
+                   "conclusion":"failure","html_url":"https://github.com/owner/repository/actions/runs/20"}
+                ]}]
+                """;
+            return Task.FromResult(new CommandResult(0, body, ""));
+        });
+
+        var checks = await gateway.GetCommitChecksAsync("owner/repository", new string('c', 40),
+            testContext.CancellationToken);
+
+        Assert.DoesNotContain("Dependabot", checks.Select(check => check.Name));
+        Assert.Contains("build", checks.Select(check => check.Name));
+        Assert.IsNull(MergePolicy.GetChecksBlocker(checks, new RepositoryProfile()));
+    }
+
+    /// <summary>
     /// Keeps the commit pending when an overall workflow is still running despite a successful initial job.
     /// </summary>
     /// <returns>The test task.</returns>
