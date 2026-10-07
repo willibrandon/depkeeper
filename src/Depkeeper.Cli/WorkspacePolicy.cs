@@ -98,11 +98,9 @@ internal sealed class WorkspacePolicy
         var changed = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in left.RootElement.EnumerateObject()
             .Where(property => property.Name != "allowScripts" &&
-                !dependencyFields.Contains(property.Name, StringComparer.Ordinal)))
-        {
-            if (!right.RootElement.TryGetProperty(property.Name, out var value) || !JsonElement.DeepEquals(property.Value, value))
-                changed.Add(property.Name);
-        }
+                !dependencyFields.Contains(property.Name, StringComparer.Ordinal))
+            .Where(property => !right.RootElement.TryGetProperty(property.Name, out var value) ||
+                !JsonElement.DeepEquals(property.Value, value))) changed.Add(property.Name);
         foreach (var property in right.RootElement.EnumerateObject().Where(property =>
             !dependencyFields.Contains(property.Name, StringComparer.Ordinal) &&
             !left.RootElement.TryGetProperty(property.Name, out _))) changed.Add(property.Name);
