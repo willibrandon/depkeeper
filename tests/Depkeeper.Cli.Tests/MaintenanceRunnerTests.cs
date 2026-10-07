@@ -26,6 +26,9 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
             await runner.RunAsync(TestData.Settings() with { RetryBlocked = true }, testContext.CancellationToken);
             Assert.IsNotNull(services.LastRepairLogs);
             Assert.Contains("npm audit still reports vulnerable qs.", services.LastRepairLogs);
+            Assert.IsNotNull(services.LastRepairEvidence);
+            Assert.DoesNotContain("npm audit still reports vulnerable qs.", services.LastRepairEvidence.CurrentFailures);
+            Assert.Contains("npm audit still reports vulnerable qs.", services.LastRepairEvidence.Context);
             Assert.AreEqual(1, services.Repairs);
         }
         finally { Directory.Delete(directory, true); }

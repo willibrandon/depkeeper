@@ -66,6 +66,11 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     internal string? LastRepairLogs { get; private set; }
 
     /// <summary>
+    /// Gets the evidence supplied to the most recent repair attempt.
+    /// </summary>
+    internal RepairEvidence? LastRepairEvidence { get; private set; }
+
+    /// <summary>
     /// Gets the exact merge commit checked after a merge.
     /// </summary>
     internal List<string> VerifiedCommits { get; } = [];
@@ -135,6 +140,11 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     /// </summary>
     internal bool FailedRerunSucceeds { get; set; }
 
+    /// <summary>
+    /// Gets or sets whether retrying failed recovery PR checks resolves a transient failure.
+    /// </summary>
+    internal bool RecoveryRerunSucceeds { get; set; }
+
     Task<IReadOnlyList<PullRequestSnapshot>> IGitHubGateway.ListAsync(string repository, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<PullRequestSnapshot>>(PullRequests.Where(pr =>
             pr.Repository == repository && pr.State == "OPEN" && !pr.ManagedRecovery)
@@ -198,8 +208,24 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
         CheckRefreshes++;
         if (failedOnly)
         {
-            if (FailedRerunSucceeds) OnCommitChecks = _ => TestData.PullRequest().Checks;
-            return Task.FromResult(FailedRerunSucceeds);
+            var recovery = PullRequests.Any(pullRequest => pullRequest.ManagedRecovery && pullRequest.Head == commit);
+            if (!recovery && FailedRerunSucceeds) OnCommitChecks = _ => TestData.PullRequest().Checks;
+            if (recovery && RecoveryRerunSucceeds)
+            {
+                for (var index = 0; index < PullRequests.Count; index++)
+                {
+                    if (!PullRequests[index].ManagedRecovery) continue;
+                    PullRequests[index] = PullRequests[index] with
+                    {
+                        Checks = PullRequests[index].Checks.Select(check => check with
+                        {
+                            State = "SUCCESS",
+                            CompletedAt = DateTimeOffset.UtcNow
+                        }).ToArray()
+                    };
+                }
+            }
+            return Task.FromResult(recovery ? RecoveryRerunSucceeds : FailedRerunSucceeds);
         }
         for (var index = 0; index < PullRequests.Count; index++)
             PullRequests[index] = PullRequests[index] with
@@ -239,19 +265,23 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
         return Task.CompletedTask;
     }
 
-    Task<RepairResult> IRepairer.RepairAsync(PullRequestSnapshot pullRequest, string logs, RepositoryProfile profile,
+    Task<RepairResult> IRepairer.RepairAsync(PullRequestSnapshot pullRequest, RepairEvidence evidence,
+        RepositoryProfile profile,
         CancellationToken cancellationToken)
     {
         Repairs++;
-        LastRepairLogs = logs;
+        LastRepairEvidence = evidence;
+        LastRepairLogs = evidence.Prompt;
         return Task.FromResult(OnRepair?.Invoke(pullRequest) ?? new RepairResult(null, "No repair available."));
     }
 
-    Task<RepairResult> IRepairer.CreateRecoveryAsync(RecoveryRequest request, string logs, RepositoryProfile profile,
+    Task<RepairResult> IRepairer.CreateRecoveryAsync(RecoveryRequest request, RepairEvidence evidence,
+        RepositoryProfile profile,
         CancellationToken cancellationToken)
     {
         Repairs++;
-        LastRepairLogs = logs;
+        LastRepairEvidence = evidence;
+        LastRepairLogs = evidence.Prompt;
         var result = OnRecovery?.Invoke(request) ?? new RepairResult(new string('d', 40), "Validated recovery.");
         PublishedRecoveryHead = result.Head;
         return Task.FromResult(result);

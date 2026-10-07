@@ -202,14 +202,15 @@ internal sealed class MaintenanceRunner
                             _state.SetNextRepository((repositoryIndex + 1) % settings.Repositories.Length);
                             _state.Set(current.Key,
                                 new AttemptState(current.Head, attempts, false, "Repair in progress.", _clock.GetUtcNow()));
-                            var logs = await _github.GetFailureLogsAsync(current, cancellationToken);
-                            logs += _reviews.Format(reviewThreads);
+                            var currentFailures = await _github.GetFailureLogsAsync(current, cancellationToken);
+                            var context = _reviews.Format(reviewThreads);
                             if (settings.RetryBlocked && previous?.Blocked == true)
-                                logs += "\nPrevious independent verification for this revision:\n" + previous.Reason;
+                                context += "\nPrevious independent verification for this revision:\n" + previous.Reason;
+                            var evidence = new RepairEvidence(currentFailures, context);
                             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                             timeout.CancelAfter(settings.RepairTimeout);
                             RepairResult repair;
-                            try { repair = await _repairer.RepairAsync(current, logs, profile, timeout.Token); }
+                            try { repair = await _repairer.RepairAsync(current, evidence, profile, timeout.Token); }
                             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                             {
                                 throw new InvalidOperationException(

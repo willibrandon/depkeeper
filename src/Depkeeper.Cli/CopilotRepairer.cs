@@ -38,22 +38,22 @@ internal sealed class CopilotRepairer : IRepairer
     /// Produces a verified repair on a disposable checkout and pushes only a fast-forward commit.
     /// </summary>
     /// <param name="pullRequest">The expected source revision.</param>
-    /// <param name="logs">Sanitized failed-job logs.</param>
+    /// <param name="evidence">Current failed-job logs separated from supplemental context.</param>
     /// <param name="profile">Trusted validation configuration.</param>
     /// <param name="cancellationToken">Cancels all repair operations.</param>
     /// <returns>The pushed revision and diagnostic summary.</returns>
-    public Task<RepairResult> RepairAsync(PullRequestSnapshot pullRequest, string logs, RepositoryProfile profile,
-        CancellationToken cancellationToken) => RepairCoreAsync(pullRequest, logs, profile, false, cancellationToken);
+    public Task<RepairResult> RepairAsync(PullRequestSnapshot pullRequest, RepairEvidence evidence, RepositoryProfile profile,
+        CancellationToken cancellationToken) => RepairCoreAsync(pullRequest, evidence, profile, false, cancellationToken);
 
     /// <summary>
     /// Builds a verified follow-up fix in a separate recovery branch.
     /// </summary>
     /// <param name="request">The exact base revision and controlled destination branch.</param>
-    /// <param name="logs">The post-merge failure evidence.</param>
+    /// <param name="evidence">Current post-merge failures separated from supplemental context.</param>
     /// <param name="profile">Trusted verification settings.</param>
     /// <param name="cancellationToken">Cancels the repair.</param>
     /// <returns>The independently verified repair commit.</returns>
-    public Task<RepairResult> CreateRecoveryAsync(RecoveryRequest request, string logs, RepositoryProfile profile,
+    public Task<RepairResult> CreateRecoveryAsync(RecoveryRequest request, RepairEvidence evidence, RepositoryProfile profile,
         CancellationToken cancellationToken)
     {
         var target = PullRequestSnapshot.Lookup(request.Repository, request.SourcePullRequest) with
@@ -62,10 +62,11 @@ internal sealed class CopilotRepairer : IRepairer
             BaseBranch = request.BaseBranch,
             Branch = request.Branch
         };
-        return RepairCoreAsync(target, logs, profile, true, cancellationToken);
+        return RepairCoreAsync(target, evidence, profile, true, cancellationToken);
     }
 
-    private async Task<RepairResult> RepairCoreAsync(PullRequestSnapshot pullRequest, string logs, RepositoryProfile profile,
+    private async Task<RepairResult> RepairCoreAsync(PullRequestSnapshot pullRequest, RepairEvidence evidence,
+        RepositoryProfile profile,
         bool newBranch, CancellationToken cancellationToken)
     {
         var temporary = Directory.CreateTempSubdirectory("depkeeper-").FullName;
@@ -109,21 +110,21 @@ internal sealed class CopilotRepairer : IRepairer
             var instructions = "\nController-selected installation: " + string.Join(" && ", install) +
                 "\nController-selected verification: " + string.Join(" && ", verify);
             CommandResult? automatic = null;
-            if (setup.ExitCode == 0 && ShouldAttemptNpmAuditRepair(toolchain, logs, directory))
+            if (setup.ExitCode == 0 && ShouldAttemptNpmAuditRepair(toolchain, evidence, directory))
                 automatic = await container.RunAsync(NpmAuditRepairCommand, cancellationToken);
             var automaticDiagnostics = automatic is null ? string.Empty :
                 "\nController npm audit repair:\n" + Tail(automatic.Error + automatic.Output);
-            var summary = automatic?.ExitCode == 0
+            var automaticPaths = automatic?.ExitCode == 0
+                ? await GetChangedPathsAsync(directory, cancellationToken)
+                : [];
+            var automaticApplied = ShouldUseNpmAuditRepairResult(automatic, automaticPaths);
+            var summary = automaticApplied
                 ? "Applied npm's lockfile-only audit repair before independent validation."
-                : await RepairWorkspaceAsync(directory, logs + "\n" + initialDiagnostics + automaticDiagnostics + instructions,
-                    container, cancellationToken);
-            var changed = await GitAsync(directory, ["diff", "--name-only", "-z", "HEAD"], cancellationToken);
-            var added = await GitAsync(directory, ["ls-files", "--others", "--exclude-standard", "-z"], cancellationToken);
-            Require(changed, "Git could not inspect the repair changes.");
-            Require(added, "Git could not inspect untracked repair files.");
-            var paths = (changed.Output + added.Output).Split('\0', StringSplitOptions.RemoveEmptyEntries)
-                .Distinct(StringComparer.Ordinal).ToArray();
-            if (paths.Length == 0) return new RepairResult(null, "Copilot produced no file changes. " + summary);
+                : await RepairWorkspaceAsync(directory,
+                    evidence.Prompt + "\n" + initialDiagnostics + automaticDiagnostics + instructions, container,
+                    cancellationToken);
+            var paths = automaticApplied ? automaticPaths : await GetChangedPathsAsync(directory, cancellationToken);
+            if (paths.Length == 0) return new RepairResult(null, "Repair produced no file changes. " + summary);
             if (paths.Length > 30) throw new InvalidOperationException("Repair touched more than 30 files; manual review is required.");
             foreach (var path in paths)
             {
@@ -197,12 +198,31 @@ internal sealed class CopilotRepairer : IRepairer
     /// Determines whether a failed Node verification is eligible for npm's lockfile-only audit repair.
     /// </summary>
     /// <param name="toolchain">The controller-selected toolchain.</param>
-    /// <param name="logs">The bounded failed-check evidence.</param>
+    /// <param name="evidence">Current failed-check evidence separated from historical context.</param>
     /// <param name="directory">The isolated checkout root.</param>
     /// <returns>Whether the deterministic remediation should run before Copilot.</returns>
-    internal static bool ShouldAttemptNpmAuditRepair(ToolchainProfile toolchain, string logs, string directory) =>
+    internal static bool ShouldAttemptNpmAuditRepair(ToolchainProfile toolchain, RepairEvidence evidence, string directory) =>
         toolchain.Name == "node" && File.Exists(Path.Join(directory, "package-lock.json")) &&
-        logs.Contains("# npm audit report", StringComparison.OrdinalIgnoreCase);
+        evidence.HasNpmAuditReport;
+
+    /// <summary>
+    /// Determines whether the deterministic npm repair made durable candidate changes.
+    /// </summary>
+    /// <param name="result">The npm audit repair command result.</param>
+    /// <param name="changedPaths">Paths changed after the command completed.</param>
+    /// <returns>Whether the repair can proceed without invoking Copilot.</returns>
+    internal static bool ShouldUseNpmAuditRepairResult(CommandResult? result, IReadOnlyCollection<string> changedPaths) =>
+        result?.ExitCode == 0 && changedPaths.Count > 0;
+
+    private async Task<string[]> GetChangedPathsAsync(string directory, CancellationToken cancellationToken)
+    {
+        var changed = await GitAsync(directory, ["diff", "--name-only", "-z", "HEAD"], cancellationToken);
+        var added = await GitAsync(directory, ["ls-files", "--others", "--exclude-standard", "-z"], cancellationToken);
+        Require(changed, "Git could not inspect the repair changes.");
+        Require(added, "Git could not inspect untracked repair files.");
+        return (changed.Output + added.Output).Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Distinct(StringComparer.Ordinal).ToArray();
+    }
 
     private static void ValidateManifest(string path, string expected, string? baseline, string candidate)
     {
