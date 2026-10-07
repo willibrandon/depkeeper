@@ -11,5 +11,7 @@ namespace Depkeeper.Cli;
 /// <param name="Blocked">Whether the recovery needs an explicit retry.</param>
 /// <param name="Reason">The most recent repair or validation failure.</param>
 /// <param name="CiRetried">Whether a failed CI run was already retried before proposing code changes.</param>
+/// <param name="PullRequestCiRetriedHead">The exact recovery PR head whose failed checks were retried.</param>
 internal sealed record RecoveryState(string Branch, string BaseHead, int Attempts = 0, int? PullRequest = null,
-    string? Head = null, bool Blocked = false, string? Reason = null, bool CiRetried = false);
+    string? Head = null, bool Blocked = false, string? Reason = null, bool CiRetried = false,
+    string? PullRequestCiRetriedHead = null);

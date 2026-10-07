@@ -65,6 +65,37 @@ public sealed class RecoveryRunnerTests(TestContext testContext)
     }
 
     /// <summary>
+    /// Retries a transient failure on the exact recovery PR head before spending another repair session.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task TransientRecoveryPrFailureIsRetriedBeforeRepair()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-recovery-").FullName;
+        try
+        {
+            var (services, state, settings) = Create(directory);
+            services.RecoveryChecks =
+            [
+                new CheckSnapshot("integration", "FAILURE",
+                    "https://github.com/owner/repository/actions/runs/234/job/567", DateTimeOffset.UtcNow)
+            ];
+            services.RecoveryRerunSucceeds = true;
+            var runner = new MaintenanceRunner(services, services, state, new Redactor(), TestData.AgeGate(),
+                pollInterval: TimeSpan.Zero);
+
+            var results = await runner.RunAsync(settings, testContext.CancellationToken);
+
+            Assert.AreEqual("merged", results.Single().Outcome);
+            Assert.AreEqual(1, services.Repairs);
+            Assert.AreEqual(2, services.CheckRefreshes);
+            Assert.AreEqual(1, services.CreatedRecoveries);
+            Assert.AreEqual(1, services.Merges);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
     /// Creates one recovery PR and verifies its merged commit before clearing the original blocker.
     /// </summary>
     /// <returns>The test task.</returns>
