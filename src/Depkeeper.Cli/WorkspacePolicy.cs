@@ -130,11 +130,12 @@ internal sealed class WorkspacePolicy
             var oldValues = Properties(oldDocument.RootElement, field);
             var expectedValues = Properties(expectedDocument.RootElement, field);
             var candidateValues = Properties(candidateDocument.RootElement, field);
-            foreach (var name in oldValues.Keys.Concat(expectedValues.Keys).Distinct(StringComparer.Ordinal))
+            var updates = oldValues.Keys.Concat(expectedValues.Keys).Distinct(StringComparer.Ordinal)
+                .Select(name => (Name: name, Old: oldValues.GetValueOrDefault(name),
+                    Expected: expectedValues.GetValueOrDefault(name)))
+                .Where(update => !Same(update.Old, update.Expected));
+            foreach (var (name, _, expectedValue) in updates)
             {
-                oldValues.TryGetValue(name, out var oldValue);
-                expectedValues.TryGetValue(name, out var expectedValue);
-                if (Same(oldValue, expectedValue)) continue;
                 candidateValues.TryGetValue(name, out var candidateValue);
                 if (!Same(expectedValue, candidateValue)) reverted.Add(field + "." + name);
             }
