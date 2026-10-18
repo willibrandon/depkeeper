@@ -142,7 +142,7 @@ internal sealed class CopilotRepairer : IRepairer
             {
                 var error = validation.Error.Length > 800 ? validation.Error[^800..] : validation.Error;
                 var output = validation.Output.Length > 400 ? validation.Output[^400..] : validation.Output;
-                throw new InvalidOperationException("Independent validation failed: " + error + "\nOutput: " + output);
+                throw new RepairValidationException("Independent validation failed: " + error + "\nOutput: " + output);
             }
             // Include files created during verification in the final guard and secret scan.
             Require(await GitAsync(directory, ["add", "--all"], cancellationToken),
@@ -233,7 +233,7 @@ internal sealed class CopilotRepairer : IRepairer
         if (baseline is null) return;
         var reverted = WorkspacePolicy.RevertedDependencyUpdates(baseline, expected, candidate);
         if (reverted.Count > 0)
-            throw new InvalidOperationException(
+            throw new RepairValidationException(
                 $"Repair reverted the Dependabot dependency update in {path}: {string.Join(", ", reverted)}.");
     }
 

@@ -18,6 +18,7 @@ internal sealed class MaintenanceRunner
     private readonly FreshCi _freshCi;
     private readonly RecoveryRunner _recovery;
     private readonly ReviewCoordinator _reviews;
+    private readonly NpmCompatibilityGate? _compatibility;
 
     /// <summary>
     /// Creates a controller with replaceable GitHub and repair boundaries.
@@ -29,8 +30,10 @@ internal sealed class MaintenanceRunner
     /// <param name="releaseAge">The publication-age gate.</param>
     /// <param name="clock">An optional test clock.</param>
     /// <param name="pollInterval">An optional polling interval for deterministic tests.</param>
+    /// <param name="compatibility">An optional registry-backed npm peer compatibility gate.</param>
     internal MaintenanceRunner(IGitHubGateway github, IRepairer repairer, StateStore state, Redactor redactor,
-        IReleaseAgeGate releaseAge, TimeProvider? clock = null, TimeSpan? pollInterval = null)
+        IReleaseAgeGate releaseAge, TimeProvider? clock = null, TimeSpan? pollInterval = null,
+        NpmCompatibilityGate? compatibility = null)
     {
         _github = github;
         _repairer = repairer;
@@ -43,6 +46,7 @@ internal sealed class MaintenanceRunner
         _freshCi = new FreshCi(github, _clock, _pollInterval);
         _recovery = new RecoveryRunner(github, repairer, state, redactor, releaseAge, _postMerge, _freshCi, _clock, WaitAsync);
         _reviews = new ReviewCoordinator(github, redactor);
+        _compatibility = compatibility;
     }
 
     /// <summary>
@@ -122,16 +126,48 @@ internal sealed class MaintenanceRunner
                     var baseTip = previous?.Blocked == true || NeedsRebase(current)
                         ? await _github.GetBranchHeadAsync(repository, current.BaseBranch, cancellationToken) : null;
                     var baseMoved = previous?.Blocked == true && previous.BaseHead != baseTip && NeedsRebase(current);
-                    if (previous?.Blocked == true && !settings.RetryBlocked && !baseMoved &&
-                        (MergePolicy.GetBlocker(current, current.Head, profile) is not null || reviewThreads.Count > 0))
-                    {
-                        results.Add(new ReportEntry(repository, current.Number, "blocked", previous.Reason));
-                        continue;
-                    }
-                    var repairsAllowed = settings.RetryBlocked || !rebasedBlocked && !baseMoved;
+                    var validationFeedback = earlier is null ? null : ValidationFeedback(earlier);
+                    var resumeValidation = validationFeedback is not null && earlier!.Attempts < settings.MaxAttempts &&
+                        (previous is not null || rebasedBlocked);
+                    var repairsAllowed = settings.RetryBlocked || resumeValidation || !rebasedBlocked && !baseMoved;
                     var attempts = settings.RetryBlocked ? 0 : previous?.Attempts ?? (rebasedBlocked ? earlier!.Attempts : 0);
+                    var repairFeedback = resumeValidation ? validationFeedback :
+                        previous?.RepairFailure ?? (rebasedBlocked ? earlier!.RepairFailure : null);
                     try
                     {
+                        NpmCompatibilityAssessment? compatibility = null;
+                        string? inspectedHead = null;
+                        if (previous?.Blocked == true && !settings.RetryBlocked && !baseMoved &&
+                            (MergePolicy.GetBlocker(current, current.Head, profile) is not null || reviewThreads.Count > 0))
+                        {
+                            compatibility = await CheckCompatibilityAsync(current, profile, cancellationToken);
+                            inspectedHead = current.Head;
+                            if (previous.UpstreamConflict is not null && compatibility?.CompatibleVersion is not null &&
+                                previous.UpstreamConflict == compatibility.Conflict)
+                            {
+                                attempts = 0;
+                                repairFeedback = null;
+                                repairsAllowed = true;
+                                previous = previous with { Blocked = false, Attempts = 0, RepairFailure = null, UpstreamConflict = null };
+                                if (!settings.DryRun) _state.Set(current.Key, previous);
+                            }
+                            else if (previous.UpstreamConflict is null && resumeValidation &&
+                                compatibility is not { CompatibleVersion: null })
+                            {
+                                previous = previous with { Blocked = false, RepairFailure = repairFeedback };
+                                if (!settings.DryRun) _state.Set(current.Key, previous);
+                            }
+                            else
+                            {
+                                var history = previous.RepairFailure ?? previous.Reason;
+                                var conflict = compatibility is { CompatibleVersion: null } ? compatibility.Conflict :
+                                    previous.UpstreamConflict;
+                                results.Add(RecordBlocker(current, profile, previous with { RepairFailure = history }, conflict,
+                                    reviewThreads.Count, settings.DryRun, compatibility is { CompatibleVersion: null },
+                                    CanWaitUpstream(previous)));
+                                continue;
+                            }
+                        }
                         var ownership = NeedsRebase(current)
                             ? await _github.GetBranchOwnershipAsync(current, cancellationToken) : BranchOwnership.Foreign;
                         var owned = ownership != BranchOwnership.Foreign;
@@ -160,6 +196,17 @@ internal sealed class MaintenanceRunner
                         if (ageBlocker is not null)
                         {
                             results.Add(new ReportEntry(repository, current.Number, "cooldown", ageBlocker));
+                            continue;
+                        }
+                        if (inspectedHead != current.Head)
+                            compatibility = await CheckCompatibilityAsync(current, profile, cancellationToken);
+                        if (compatibility is { CompatibleVersion: null })
+                        {
+                            var saved = new AttemptState(current.Head, attempts, true, "", _clock.GetUtcNow(),
+                                BaseHead: await BaseTipAsync(repository, current, cancellationToken), RepairFailure: repairFeedback);
+                            results.Add(RecordBlocker(current, profile, saved, compatibility.Conflict,
+                                reviewThreads.Count, settings.DryRun,
+                                resumeUpstream: repairsAllowed || earlier is null || CanWaitUpstream(earlier)));
                             continue;
                         }
                         if (settings.DryRun)
@@ -201,22 +248,38 @@ internal sealed class MaintenanceRunner
                             mutated = true;
                             _state.SetNextRepository((repositoryIndex + 1) % settings.Repositories.Length);
                             _state.Set(current.Key,
-                                new AttemptState(current.Head, attempts, false, "Repair in progress.", _clock.GetUtcNow()));
+                                new AttemptState(current.Head, attempts, false, "Repair in progress.", _clock.GetUtcNow(),
+                                    RepairFailure: repairFeedback));
                             var currentFailures = await _github.GetFailureLogsAsync(current, cancellationToken);
                             var context = _reviews.Format(reviewThreads);
                             if (settings.RetryBlocked && previous?.Blocked == true)
-                                context += "\nPrevious independent verification for this revision:\n" + previous.Reason;
+                                context += "\nPrevious independent verification for this revision:\n" +
+                                    (previous.RepairFailure ?? previous.Reason);
+                            if (!string.IsNullOrWhiteSpace(repairFeedback))
+                                context += "\nIndependent validation rejected the previous candidate:\n" + repairFeedback;
+                            if (compatibility?.CompatibleVersion is string available)
+                                context += $"\nRegistry metadata identifies {compatibility.Conflict.Package}@{available} " +
+                                    "as supporting the selected peer version. Preserve all dependency values introduced by this PR.";
                             var evidence = new RepairEvidence(currentFailures, context);
                             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                             timeout.CancelAfter(settings.RepairTimeout);
                             RepairResult repair;
                             try { repair = await _repairer.RepairAsync(current, evidence, profile, timeout.Token); }
+                            catch (RepairValidationException exception)
+                            {
+                                repairFeedback = _redactor.Clean(exception.Message);
+                                if (repairFeedback.Length > 1200) repairFeedback = repairFeedback[..1200];
+                                _state.Set(current.Key, new AttemptState(current.Head, attempts, false, repairFeedback,
+                                    _clock.GetUtcNow(), RepairFailure: repairFeedback));
+                                continue;
+                            }
                             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                             {
                                 throw new InvalidOperationException(
                                     "Repair exceeded its time budget. Inspect the failure and retry explicitly.");
                             }
                             if (repair.Head is null) throw new InvalidOperationException(repair.Summary);
+                            repairFeedback = null;
                             mutated = true;
                             current = current with { Head = repair.Head };
                             _state.Set(current.Key, new AttemptState(current.Head, attempts, false, "Waiting for CI.", _clock.GetUtcNow()));
@@ -232,11 +295,11 @@ internal sealed class MaintenanceRunner
                         {
                             if (!repairsAllowed)
                                 throw new InvalidOperationException(
-                                    "Checks still fail after the branch was brought up to date; the earlier blocker stands: " +
-                                    earlier?.Reason);
+                                    "Checks still fail after the branch was brought up to date.");
                             if (attempts >= settings.MaxAttempts)
                                 throw new InvalidOperationException(
-                                    "Repair attempt limit reached. Remaining checks or review threads: " +
+                                    "Repair attempt limit reached. " + (repairFeedback is null ? "" : repairFeedback + " ") +
+                                    "Remaining checks or review threads: " +
                                     FailedNames(current, reviewThreads));
                             results.Add(new ReportEntry(repository, current.Number, "deferred",
                                 "Daily repair budget reached. Remaining checks or review threads: " +
@@ -309,12 +372,15 @@ internal sealed class MaintenanceRunner
                     {
                         var reason = _redactor.Clean(exception.Message);
                         if (reason.Length > 1500) reason = reason[..1500];
-                        results.Add(new ReportEntry(repository, current.Number, "blocked", reason));
+                        var history = repairFeedback ?? (rebasedBlocked || baseMoved ?
+                            earlier?.RepairFailure ?? earlier?.Reason : reason);
+                        var detail = BlockerReport.Format(current, profile, history, reviewThreads.Count, _redactor);
+                        results.Add(new ReportEntry(repository, current.Number, "blocked", detail));
                         if (!settings.DryRun)
                         {
-                            _state.Set(current.Key, new AttemptState(current.Head, attempts, true, reason, _clock.GetUtcNow(),
-                                BaseHead: await BaseTipAsync(repository, current, cancellationToken)));
-                            try { await _github.CommentAsync(current, "Depkeeper stopped this repair: " + reason, cancellationToken); }
+                            _state.Set(current.Key, new AttemptState(current.Head, attempts, true, detail, _clock.GetUtcNow(),
+                                BaseHead: await BaseTipAsync(repository, current, cancellationToken), RepairFailure: history));
+                            try { await _github.CommentAsync(current, "Depkeeper stopped this repair: " + detail, cancellationToken); }
                             catch (Exception commentError) when (commentError is IOException or InvalidOperationException)
                             {
                                 results.Add(new ReportEntry(repository, current.Number, "advisory",
@@ -375,6 +441,44 @@ internal sealed class MaintenanceRunner
         catch (Exception exception) when (exception is IOException or InvalidOperationException) { return null; }
     }
 
+    private async Task<NpmCompatibilityAssessment?> CheckCompatibilityAsync(PullRequestSnapshot current, RepositoryProfile profile,
+        CancellationToken cancellationToken) => _compatibility is not null && MergePolicy.ChecksFinished(current) &&
+        MergePolicy.HasFailure(current, profile) ? await _compatibility.CheckAsync(current,
+            await _github.GetFailureLogsAsync(current, cancellationToken), cancellationToken) : null;
+
+    private ReportEntry RecordBlocker(PullRequestSnapshot current, RepositoryProfile profile, AttemptState saved,
+        NpmPeerConflict? conflict, int reviews, bool dryRun, bool upstreamVerified = true, bool resumeUpstream = true)
+    {
+        var upstream = conflict is null ? null : upstreamVerified ? conflict.Summary :
+            "Upstream compatibility could not be refreshed. Last verified blocker: " + conflict.Summary;
+        var detail = BlockerReport.Format(current, profile, saved.RepairFailure, reviews, _redactor,
+            upstream);
+        if (!dryRun)
+            _state.Set(current.Key, saved with
+            {
+                Head = current.Head,
+                Blocked = true,
+                Reason = detail,
+                RepairFailure = saved.RepairFailure ?? "",
+                UpstreamConflict = resumeUpstream ? conflict : null
+            });
+        return new ReportEntry(current.Repository, current.Number, "blocked", detail);
+    }
+
+    private static bool CanWaitUpstream(AttemptState saved)
+    {
+        return saved.UpstreamConflict is not null || ValidationFeedback(saved) is not null;
+    }
+
+    private static string? ValidationFeedback(AttemptState saved)
+    {
+        var failure = saved.RepairFailure ?? saved.Reason;
+        const string legacy = "Checks still fail after the branch was brought up to date; the earlier blocker stands: ";
+        while (failure.StartsWith(legacy, StringComparison.Ordinal)) failure = failure[legacy.Length..];
+        return failure.StartsWith("Independent validation failed:", StringComparison.Ordinal) ||
+            failure.StartsWith("Repair reverted the Dependabot dependency update", StringComparison.Ordinal) ? failure : null;
+    }
+
     private async Task<PullRequestSnapshot> WaitForMergeabilityAsync(PullRequestSnapshot current, CancellationToken cancellationToken)
     {
         var deadline = _clock.GetUtcNow() + TimeSpan.FromMinutes(2);
@@ -408,7 +512,7 @@ internal sealed class MaintenanceRunner
                 ownership == BranchOwnership.Dependabot ? "@dependabot rebase" : "@dependabot recreate", cancellationToken);
             _state.Set(current.Key, new AttemptState(current.Head, previous?.Attempts ?? 0, previous?.Blocked ?? false,
                 previous?.Reason ?? "Waiting for Dependabot to rebase.", _clock.GetUtcNow(), BaseHead: baseTip,
-                RebaseRequested: true));
+                RebaseRequested: true, RepairFailure: previous?.RepairFailure, UpstreamConflict: previous?.UpstreamConflict));
         }
         var latest = await WaitAsync(current, timeout, true, cancellationToken);
         return latest.Head == current.Head ? null : latest;

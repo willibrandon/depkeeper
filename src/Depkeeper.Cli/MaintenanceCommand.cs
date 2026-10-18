@@ -69,7 +69,8 @@ internal static class MaintenanceCommand
                     pypi.GetAsync, hex.GetAsync);
                 var ageGate = new ReleaseAgeGate(gateway.GetDependencyChangesAsync, publications.GetAsync,
                     codeOnly: gateway.IsCodeOnlyRecoveryAsync);
-                var controller = new MaintenanceRunner(gateway, repairer, store, redactor, ageGate);
+                var compatibility = new NpmCompatibilityGate(http, gateway.GetNpmManifestsAsync);
+                var controller = new MaintenanceRunner(gateway, repairer, store, redactor, ageGate, compatibility: compatibility);
                 var entries = await controller.RunAsync(settings, cancellationToken);
                 var markdown = ReportWriter.Format(entries, settings.Model, settings.DryRun, redactor);
                 var reportPath = Path.GetFullPath(result.GetValue(report)!);

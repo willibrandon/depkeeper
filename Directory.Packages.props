@@ -6,6 +6,7 @@
   <ItemGroup>
     <PackageVersion Include="GitHub.Copilot.SDK" Version="*" />
     <PackageVersion Include="System.CommandLine" Version="*" />
+    <PackageVersion Include="Semver" Version="*" />
     <PackageVersion Include="MSTest" Version="*" />
   </ItemGroup>
 </Project>

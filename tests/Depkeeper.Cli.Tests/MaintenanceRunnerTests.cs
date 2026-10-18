@@ -435,7 +435,8 @@ public sealed class MaintenanceRunnerTests(TestContext testContext)
             var runner = new MaintenanceRunner(services, services, store, new Redactor(), TestData.AgeGate());
             var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
             Assert.AreEqual("blocked", results.Single().Outcome);
-            Assert.AreEqual("Independent validation failed.", results.Single().Detail);
+            Assert.Contains("Current CI at " + pr.Head, results.Single().Detail);
+            Assert.Contains("Previous repair result: Independent validation failed.", results.Single().Detail);
             Assert.AreEqual(0, services.Comments);
         }
         finally { Directory.Delete(directory, true); }

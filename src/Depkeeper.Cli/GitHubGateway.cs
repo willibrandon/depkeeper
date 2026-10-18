@@ -628,6 +628,26 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         return changes;
     }
 
+    /// <summary>
+    /// Reads changed npm manifests at the exact revision for independent compatibility checks.
+    /// </summary>
+    /// <param name="pullRequest">The inspected PR revision.</param>
+    /// <param name="cancellationToken">Cancels GitHub reads.</param>
+    /// <returns>The available manifest contents indexed by repository-relative path.</returns>
+    internal async Task<IReadOnlyDictionary<string, string>> GetNpmManifestsAsync(PullRequestSnapshot pullRequest,
+        CancellationToken cancellationToken)
+    {
+        var files = await GetPullRequestFilesAsync(pullRequest, cancellationToken);
+        var manifests = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var path in files.Where(file => Path.GetFileName(Text(file, "filename")) == "package.json" &&
+            Text(file, "status") != "removed").Take(20).Select(file => Text(file, "filename")))
+        {
+            var content = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.Head, path, cancellationToken);
+            if (content is not null) manifests[path] = content;
+        }
+        return manifests;
+    }
+
     private async Task<JsonElement[]> GetPullRequestFilesAsync(PullRequestSnapshot pullRequest,
         CancellationToken cancellationToken)
     {

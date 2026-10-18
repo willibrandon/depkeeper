@@ -71,6 +71,11 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     internal RepairEvidence? LastRepairEvidence { get; private set; }
 
     /// <summary>
+    /// Gets or sets the current failed-check diagnostics.
+    /// </summary>
+    internal string FailureLogs { get; set; } = "Synthetic test failure.";
+
+    /// <summary>
     /// Gets the exact merge commit checked after a merge.
     /// </summary>
     internal List<string> VerifiedCommits { get; } = [];
@@ -158,7 +163,7 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     }
 
     Task<string> IGitHubGateway.GetFailureLogsAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken) =>
-        Task.FromResult("Synthetic test failure.");
+        Task.FromResult(FailureLogs);
 
     Task<IReadOnlyList<ReviewThread>> IGitHubGateway.GetReviewThreadsAsync(PullRequestSnapshot pullRequest,
         CancellationToken cancellationToken)
