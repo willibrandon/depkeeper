@@ -639,10 +639,9 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     {
         var files = await GetPullRequestFilesAsync(pullRequest, cancellationToken);
         var manifests = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var file in files.Where(file => Path.GetFileName(Text(file, "filename")) == "package.json" &&
-            Text(file, "status") != "removed").Take(20))
+        foreach (var path in files.Where(file => Path.GetFileName(Text(file, "filename")) == "package.json" &&
+            Text(file, "status") != "removed").Take(20).Select(file => Text(file, "filename")))
         {
-            var path = Text(file, "filename");
             var content = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.Head, path, cancellationToken);
             if (content is not null) manifests[path] = content;
         }

@@ -93,12 +93,14 @@ internal sealed partial class NpmCompatibilityGate
                 !SemVersion.TryParse(conflict.PeerVersion, SemVersionStyles.Strict, out var selected) || selected.IsPrerelease ||
                 SemVersionRange.ParseNpm(conflict.Range).Contains(selected)) return null;
             var supporting = new List<SemVersion>();
-            foreach (var entry in versions.EnumerateObject())
+            var candidates = versions.EnumerateObject()
+                .Select(entry => (Version: ParseVersion(entry.Name), Metadata: entry.Value))
+                .Where(release => release.Version is not null && !release.Version.IsPrerelease &&
+                    release.Version.ComparePrecedenceTo(minimum) >= 0)
+                .Select(release => (Version: release.Version!, release.Metadata));
+            foreach (var (candidate, metadata) in candidates)
             {
-                if (!SemVersion.TryParse(entry.Name, SemVersionStyles.Strict, out var candidate) || candidate.IsPrerelease ||
-                    candidate.ComparePrecedenceTo(minimum) < 0) continue;
-                var metadata = entry.Value;
-                if (Text(metadata, "name") != conflict.Package || Text(metadata, "version") != entry.Name) return null;
+                if (Text(metadata, "name") != conflict.Package || Text(metadata, "version") != candidate.ToString()) return null;
                 if (metadata.TryGetProperty("deprecated", out var deprecated) &&
                     deprecated.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(deprecated.GetString())) continue;
                 var required = PeerRange(metadata, conflict.Peer);
@@ -117,6 +119,9 @@ internal sealed partial class NpmCompatibilityGate
             return null;
         }
     }
+
+    private static SemVersion? ParseVersion(string value) =>
+        SemVersion.TryParse(value, SemVersionStyles.Strict, out var version) ? version : null;
 
     private static bool Declares(string content, string package, string version, string? peer = null, string? selected = null)
     {

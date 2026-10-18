@@ -132,7 +132,7 @@ internal sealed class MaintenanceRunner
                     var repairsAllowed = settings.RetryBlocked || resumeValidation || !rebasedBlocked && !baseMoved;
                     var attempts = settings.RetryBlocked ? 0 : previous?.Attempts ?? (rebasedBlocked ? earlier!.Attempts : 0);
                     var repairFeedback = resumeValidation ? validationFeedback :
-                        previous?.RepairFailure ?? (rebasedBlocked ? earlier?.RepairFailure : null);
+                        previous?.RepairFailure ?? (rebasedBlocked ? earlier!.RepairFailure : null);
                     try
                     {
                         NpmCompatibilityAssessment? compatibility = null;
