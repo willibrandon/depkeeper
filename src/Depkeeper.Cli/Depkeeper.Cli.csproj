@@ -7,6 +7,7 @@
   <ItemGroup>
     <PackageReference Include="GitHub.Copilot.SDK" />
     <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Semver" />
     <InternalsVisibleTo Include="Depkeeper.Cli.Tests" />
   </ItemGroup>
 </Project>

@@ -8,6 +8,69 @@ namespace Depkeeper.Cli.Tests;
 public sealed class RecoveryRunnerTests(TestContext testContext)
 {
     /// <summary>
+    /// Exhausts the existing attempt limit for rejected recovery candidates without creating or repeating a recovery PR.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task RecoveryValidationFailuresRemainBoundedAcrossSweeps()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-recovery-").FullName;
+        try
+        {
+            var (services, state, settings) = Create(directory);
+            services.OnRecovery = _ => throw new RepairValidationException("Independent validation failed: audit still fails.");
+            settings = settings with { MaxRepairs = 3 };
+            var runner = new MaintenanceRunner(services, services, state, new Redactor(), TestData.AgeGate());
+
+            var result = await runner.RunAsync(settings, testContext.CancellationToken);
+            state = new StateStore(Path.Join(directory, "state.json"));
+            runner = new MaintenanceRunner(services, services, state, new Redactor(), TestData.AgeGate());
+            var repeated = await runner.RunAsync(settings, testContext.CancellationToken);
+
+            Assert.AreEqual("blocked", result.Single().Outcome);
+            Assert.AreEqual("blocked", repeated.Single().Outcome);
+            Assert.AreEqual(2, services.Repairs);
+            Assert.AreEqual(0, services.CreatedRecoveries);
+            Assert.IsTrue(state.State.PullRequests.Values.Single().Recovery!.Blocked);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
+    /// Retries independently rejected recovery candidates within the existing attempt and daily budgets.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task RecoveryValidationFeedbackSurvivesDailyBudgetDeferral()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-recovery-").FullName;
+        try
+        {
+            var (services, state, settings) = Create(directory);
+            services.OnRecovery = _ => throw new RepairValidationException("Independent validation failed: audit still fails.");
+            var runner = new MaintenanceRunner(services, services, state, new Redactor(), TestData.AgeGate());
+
+            var first = await runner.RunAsync(settings, testContext.CancellationToken);
+            Assert.AreEqual("deferred", first.Single().Outcome);
+            Assert.AreEqual(1, services.Repairs);
+            state = new StateStore(Path.Join(directory, "state.json"));
+            services.OnRecovery = _ =>
+            {
+                Assert.IsNotNull(services.LastRepairEvidence);
+                Assert.Contains("audit still fails", services.LastRepairEvidence.Context);
+                return new RepairResult(new string('d', 40), "Independently validated recovery.");
+            };
+            runner = new MaintenanceRunner(services, services, state, new Redactor(), TestData.AgeGate());
+            var second = await runner.RunAsync(settings, testContext.CancellationToken);
+
+            Assert.AreEqual("merged", second.Single().Outcome);
+            Assert.AreEqual(2, services.Repairs);
+            Assert.AreEqual(1, services.CreatedRecoveries);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
     /// Can enroll an explicitly selected historical merge whose PR is no longer open.
     /// </summary>
     /// <returns>The test task.</returns>

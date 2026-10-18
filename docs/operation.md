@@ -11,6 +11,13 @@ configuration changes, and changes to npm scripts, identity, version, or engines
 Those cases are reported for manual review rather than bypassing checks.
 It also rejects repairs that revert a direct dependency value introduced by the
 Dependabot head.
+Independent validation failures and rejected reversions feed the next controller-owned
+attempt with the original CI evidence kept separate. Each attempt uses a fresh checkout,
+the configured attempt and daily repair budgets still apply, and exhausted heads remain
+blocked. Protected-path, security-policy, infrastructure, and timeout failures stop the
+repair immediately. Validation feedback survives a daily-budget deferral.
+Older checkpoints stopped by a recoverable validation failure may spend their remaining
+attempts without resetting the consumed budget, including after a controller-requested rebase.
 Generated `LICENSES/*.txt` entries may be removed when the original npm license check
 is selected and passes independent verification. Node projects use their full `verify`
 script when available.
@@ -60,9 +67,22 @@ created. Changes that may alter dependencies remain subject to publication-age p
   post-merge verification closes the corresponding managed issue, and so does a tracked PR that
   is closed or merged without Depkeeper. Pending CI and cooldowns do not open issues.
   `--report-repo OWNER/REPO` explicitly selects a central destination instead.
-- An unchanged blocked revision is not automatically attempted again. A new head or an
+- An exhausted or terminal blocked revision is not automatically attempted again. A new head or an
   explicit `--retry-blocked` permits reconsideration. When the base moves, a blocked
   Dependabot branch is rebased and its CI rechecked without a new repair.
+- Blocked reports describe the exact current head's checks and identify earlier repair
+  diagnostics as history. A rebase does not turn an old validation failure into current CI evidence.
+- For npm ERESOLVE failures, the controller can recognize incompatible exact direct
+  dependencies in changed package manifests when the requiring package was not itself
+  updated by the PR. It verifies both declarations at the PR head, the requiring package's
+  unchanged value at the exact base, and its peer metadata in the public npm registry. When no
+  nondeprecated stable release at or above the selected version supports the peer,
+  the update waits upstream without spending model attempts. Later sweeps inspect registry
+  metadata again; a compatible stable release reopens that upstream blocker with a fresh
+  bounded repair budget. Registry outages do not reopen it. Ranges, aliases, transitive-only
+  conflicts, and incomplete evidence retain the ordinary repair policy. Depkeeper does not
+  force peer resolution, revert the requested update, or split grouped PRs.
+  Unrelated terminal security and infrastructure failures retain their blocked verdict.
 - Exit `0` means the sweep completed; `2` means it reported blockers; `1` means a run-level
   failure. State and report artifacts remain available for inspection.
 

@@ -108,25 +108,35 @@ internal sealed class RecoveryRunner
                             checks = await _github.GetCommitChecksAsync(repository, baseHead, cancellationToken);
                         }
                     }
-                    if (budget <= used)
-                        return (Report("deferred", "Post-merge recovery is waiting for the next repair budget."), used, mutated);
-                    if (recovery.Attempts >= settings.MaxAttempts) throw new InvalidOperationException("Recovery attempt limit reached.");
-                    recovery = recovery with { BaseHead = baseHead, Attempts = recovery.Attempts + 1 };
-                    used++;
-                    mutated = true;
-                    Save();
-                    var currentFailures = await _github.GetFailureLogsAsync(
-                        source with { Head = baseHead, Checks = checks }, cancellationToken);
-                    var context = "\nPost-merge verification:\n" + saved.Reason +
-                        "\nPrevious recovery:\n" + recovery.Reason;
-                    var evidence = new RepairEvidence(currentFailures, context);
-                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    timeout.CancelAfter(settings.RepairTimeout);
-                    request = request with { BaseHead = baseHead };
-                    var result = await _repairer.CreateRecoveryAsync(request, evidence, profile, timeout.Token);
-                    if (result.Head is null) throw new InvalidOperationException(result.Summary);
-                    recovery = recovery with { Head = result.Head };
-                    Save();
+                    while (recovery.Head is null)
+                    {
+                        if (recovery.Attempts >= settings.MaxAttempts)
+                            throw new InvalidOperationException("Recovery attempt limit reached. " + recovery.Reason);
+                        if (budget <= used)
+                            return (Report("deferred", "Post-merge recovery is waiting for the next repair budget."), used, mutated);
+                        recovery = recovery with { BaseHead = baseHead, Attempts = recovery.Attempts + 1 };
+                        used++;
+                        mutated = true;
+                        Save();
+                        var currentFailures = await _github.GetFailureLogsAsync(
+                            source with { Head = baseHead, Checks = checks }, cancellationToken);
+                        var context = "\nPost-merge verification:\n" + saved.Reason +
+                            "\nPrevious recovery validation:\n" + recovery.Reason;
+                        var evidence = new RepairEvidence(currentFailures, context);
+                        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        timeout.CancelAfter(settings.RepairTimeout);
+                        request = request with { BaseHead = baseHead };
+                        RepairResult result;
+                        try { result = await _repairer.CreateRecoveryAsync(request, evidence, profile, timeout.Token); }
+                        catch (RepairValidationException exception)
+                        {
+                            RememberValidation(exception);
+                            continue;
+                        }
+                        if (result.Head is null) throw new InvalidOperationException(result.Summary);
+                        recovery = recovery with { Head = result.Head, Reason = null };
+                        Save();
+                    }
                 }
                 if (await _github.GetBranchHeadAsync(repository, recovery.Branch, cancellationToken) != recovery.Head)
                     throw new InvalidOperationException("The published recovery branch changed before PR creation.");
@@ -188,9 +198,15 @@ internal sealed class RecoveryRunner
                 var evidence = new RepairEvidence(currentFailures, context);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(settings.RepairTimeout);
-                var repaired = await _repairer.RepairAsync(pullRequest, evidence, profile, timeout.Token);
+                RepairResult repaired;
+                try { repaired = await _repairer.RepairAsync(pullRequest, evidence, profile, timeout.Token); }
+                catch (RepairValidationException exception)
+                {
+                    RememberValidation(exception);
+                    continue;
+                }
                 if (repaired.Head is null) throw new InvalidOperationException(repaired.Summary);
-                recovery = recovery with { Head = repaired.Head };
+                recovery = recovery with { Head = repaired.Head, Reason = null };
                 Save();
                 pullRequest = await _wait(pullRequest with { Head = repaired.Head }, settings.CiTimeout, false, cancellationToken);
                 if (pullRequest.Head != repaired.Head) throw new InvalidOperationException("The recovery PR changed after repair.");
@@ -233,6 +249,14 @@ internal sealed class RecoveryRunner
         {
             attempt = attempt with { Recovery = recovery, UpdatedAt = _clock.GetUtcNow() };
             _state.Set(key, attempt);
+        }
+
+        void RememberValidation(RepairValidationException exception)
+        {
+            var feedback = _redactor.Clean(exception.Message);
+            if (feedback.Length > 1200) feedback = feedback[..1200];
+            recovery = recovery! with { Reason = feedback };
+            Save();
         }
 
         ReportEntry Report(string outcome, string detail) => new(repository, number, outcome, _redactor.Clean(detail));

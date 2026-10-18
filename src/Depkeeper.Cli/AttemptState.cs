@@ -13,6 +13,8 @@ namespace Depkeeper.Cli;
 /// <param name="Recovery">The bounded recovery PR associated with a failed merge.</param>
 /// <param name="BaseHead">The base branch tip observed when this state was recorded.</param>
 /// <param name="RebaseRequested">Whether the controller asked Dependabot to rebase this revision onto <paramref name="BaseHead"/>.</param>
+/// <param name="RepairFailure">The last independent candidate failure, kept separate from current CI.</param>
+/// <param name="UpstreamConflict">A registry-verified npm peer conflict waiting for a compatible stable release.</param>
 internal sealed record AttemptState(string Head, int Attempts, bool Blocked, string Reason, DateTimeOffset UpdatedAt,
     string? MergeHead = null, string? MergeBranch = null, RecoveryState? Recovery = null, string? BaseHead = null,
-    bool RebaseRequested = false);
+    bool RebaseRequested = false, string? RepairFailure = null, NpmPeerConflict? UpstreamConflict = null);
