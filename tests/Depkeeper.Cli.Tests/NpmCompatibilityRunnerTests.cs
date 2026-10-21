@@ -32,7 +32,7 @@ public sealed class NpmCompatibilityRunnerTests(TestContext testContext)
 
             var blocked = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
             state = new StateStore(Path.Join(directory, "state.json"));
-            Assert.AreEqual("blocked", blocked.Single().Outcome);
+            Assert.AreEqual("upstream", blocked.Single().Outcome);
             Assert.IsNotNull(state.State.PullRequests[pr.Key].UpstreamConflict);
             Assert.AreEqual(1, state.State.PullRequests[pr.Key].Attempts);
             registry = NpmCompatibilityFixture.Registry(("0.9.11", "^5.0.0 || ^6.0.0", false));
@@ -81,7 +81,7 @@ public sealed class NpmCompatibilityRunnerTests(TestContext testContext)
 
             var result = await runner.RunAsync(TestData.Settings(dryRun), testContext.CancellationToken);
 
-            Assert.AreEqual("blocked", result.Single().Outcome);
+            Assert.AreEqual("upstream", result.Single().Outcome);
             Assert.Contains("Upstream npm compatibility blocker", result.Single().Detail);
             Assert.AreEqual(0, services.Repairs);
             Assert.AreEqual(0, services.Merges);
@@ -113,7 +113,7 @@ public sealed class NpmCompatibilityRunnerTests(TestContext testContext)
             unavailable = true;
             var result = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
 
-            Assert.AreEqual("blocked", result.Single().Outcome);
+            Assert.AreEqual("upstream", result.Single().Outcome);
             Assert.Contains("could not be refreshed", result.Single().Detail);
             Assert.AreEqual(0, services.Repairs);
             Assert.IsNotNull(state.State.PullRequests.Values.Single().UpstreamConflict);

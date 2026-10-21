@@ -454,7 +454,8 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     }
 
     /// <summary>
-    /// Opens an issue for an actionable blocker, or closes its managed issue after a verified merge or a closed PR.
+    /// Opens an issue for an actionable blocker, or closes its managed issue after a verified merge, a closed PR, or once the
+    /// update only waits for an upstream release.
     /// </summary>
     /// <param name="entry">The independently determined maintenance outcome.</param>
     /// <param name="model">The configured model ID.</param>
@@ -462,7 +463,7 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     /// <param name="cancellationToken">Cancels publication.</param>
     internal async Task PublishAttentionAsync(ReportEntry entry, string model, string? destination, CancellationToken cancellationToken)
     {
-        if (entry.Outcome is not ("blocked" or "merged" or "closed")) return;
+        if (entry.Outcome is not ("blocked" or "merged" or "closed" or "upstream")) return;
         var repository = destination ?? entry.Repository;
         var identity = entry.Repository + (entry.Number > 0 ? "#" + entry.Number : string.Empty);
         var title = "Depkeeper needs attention: " + identity;
@@ -473,7 +474,8 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         using var document = JsonDocument.Parse(result.Output);
         var issue = document.RootElement.EnumerateArray().FirstOrDefault(value => Text(value, "title") == title &&
             Text(value, "body").Contains(marker, StringComparison.Ordinal));
-        if (entry.Outcome is "merged" or "closed")
+        // An upstream wait resumes without the developer, so it closes rather than opens an issue.
+        if (entry.Outcome is "merged" or "closed" or "upstream")
         {
             var completed = entry.Outcome == "merged" || entry.Detail.StartsWith("The PR was merged", StringComparison.Ordinal);
             if (issue.ValueKind != JsonValueKind.Undefined)

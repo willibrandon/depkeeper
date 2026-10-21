@@ -71,7 +71,9 @@ created. Changes that may alter dependencies remain subject to publication-age p
   and while verifying merged commits.
 - The workflow restores the latest retained checkpoint and uploads it even after failures.
 - `.state/report.md` and the Actions summary show every outcome.
-- Actionable blockers open or update a managed issue in the affected repository. Successful
+- Actionable blockers open or update a managed issue in the affected repository. A registry-verified
+  upstream wait is reported as `upstream` instead, because nothing can be done until the release exists,
+  and it closes any managed issue opened earlier for that PR. Successful
   post-merge verification closes the corresponding managed issue, and so does a tracked PR that
   is closed or merged without Depkeeper. Pending CI and cooldowns do not open issues.
   `--report-repo OWNER/REPO` explicitly selects a central destination instead.
