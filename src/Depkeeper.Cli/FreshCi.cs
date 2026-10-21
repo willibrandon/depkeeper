@@ -66,6 +66,38 @@ internal sealed class FreshCi
         return latest;
     }
 
+    /// <summary>
+    /// Reruns failed workflow jobs once and waits for their new results on the same head.
+    /// </summary>
+    /// <param name="expected">The exact failing head.</param>
+    /// <param name="profile">The repository's check policy.</param>
+    /// <param name="timeout">The CI time budget.</param>
+    /// <param name="cancellationToken">Cancels the rerun and polling.</param>
+    /// <returns>The latest snapshot, whether a rerun was requested, and whether its results arrived.</returns>
+    internal async Task<(PullRequestSnapshot PullRequest, bool Requested, bool Finished)> RetryFailuresAsync(
+        PullRequestSnapshot expected, RepositoryProfile profile, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var names = expected.Checks.Where(check => check.Failed &&
+            !(profile.AdvisoryChecks ?? []).Contains(check.Name, StringComparer.Ordinal) &&
+            IsWorkflowCheck(expected.Repository, check)).Select(check => check.Name).Distinct(StringComparer.Ordinal).ToArray();
+        if (names.Length == 0 ||
+            !await _github.RerunChecksAsync(expected.Repository, expected.Head, expected.Checks, true, cancellationToken))
+            return (expected, false, true);
+
+        var requested = _clock.GetUtcNow().AddSeconds(-5);
+        var deadline = _clock.GetUtcNow() + timeout;
+        var latest = expected;
+        while (true)
+        {
+            latest = await _github.RefreshAsync(expected, cancellationToken);
+            if (latest.Head != expected.Head || names.All(name => latest.Checks.Any(check => check.Name == name &&
+                check.Finished && check.CompletedAt >= requested))) return (latest, true, true);
+            var remaining = deadline - _clock.GetUtcNow();
+            if (remaining <= TimeSpan.Zero) return (latest, true, false);
+            await Task.Delay(remaining < _pollInterval ? remaining : _pollInterval, _clock, cancellationToken);
+        }
+    }
+
     private static bool IsWorkflowCheck(string repository, CheckSnapshot check) =>
         Uri.TryCreate(check.Url, UriKind.Absolute, out var url) && url.Scheme == "https" && url.Host == "github.com" &&
         url.AbsolutePath.StartsWith("/" + repository + "/actions/runs/", StringComparison.OrdinalIgnoreCase);

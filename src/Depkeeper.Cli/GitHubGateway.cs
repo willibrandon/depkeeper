@@ -60,10 +60,30 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         RequireSuccess(result);
         using var document = JsonDocument.Parse(result.Output);
         var current = Parse(pullRequest.Repository, document.RootElement);
+        if (current.Mergeable == "UNKNOWN" || current.MergeState == "UNKNOWN")
+            current = await ReadMergeabilityAsync(current, cancellationToken);
         return current with
         {
             ManagedRecovery = pullRequest.ManagedRecovery && current.Author == pullRequest.Author &&
                 current.Branch == pullRequest.Branch && current.BaseBranch == pullRequest.BaseBranch && !current.CrossRepository
+        };
+    }
+
+    private async Task<PullRequestSnapshot> ReadMergeabilityAsync(PullRequestSnapshot current, CancellationToken cancellationToken)
+    {
+        // GraphQL can report unknown mergeability indefinitely; the REST resource starts the calculation and returns its result.
+        var result = await ExecuteAsync(["api", $"repos/{current.Repository}/pulls/{Number(current)}"], cancellationToken);
+        RequireSuccess(result);
+        using var document = JsonDocument.Parse(result.Output);
+        var value = document.RootElement;
+        if (!value.TryGetProperty("head", out var head) || Text(head, "sha") != current.Head ||
+            !value.TryGetProperty("mergeable", out var mergeable) || mergeable.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            return current;
+        var state = Text(value, "mergeable_state").ToUpperInvariant();
+        return current with
+        {
+            Mergeable = mergeable.GetBoolean() ? "MERGEABLE" : "CONFLICTING",
+            MergeState = state.Length == 0 ? current.MergeState : state
         };
     }
 
