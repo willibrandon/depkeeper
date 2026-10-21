@@ -15,6 +15,8 @@ namespace Depkeeper.Cli;
 /// <param name="RebaseRequested">Whether the controller asked Dependabot to rebase this revision onto <paramref name="BaseHead"/>.</param>
 /// <param name="RepairFailure">The last independent candidate failure, kept separate from current CI.</param>
 /// <param name="UpstreamConflict">A registry-verified npm peer conflict waiting for a compatible stable release.</param>
+/// <param name="CiRetriedHead">The exact head whose failed checks were already rerun once.</param>
 internal sealed record AttemptState(string Head, int Attempts, bool Blocked, string Reason, DateTimeOffset UpdatedAt,
     string? MergeHead = null, string? MergeBranch = null, RecoveryState? Recovery = null, string? BaseHead = null,
-    bool RebaseRequested = false, string? RepairFailure = null, NpmPeerConflict? UpstreamConflict = null);
+    bool RebaseRequested = false, string? RepairFailure = null, NpmPeerConflict? UpstreamConflict = null,
+    string? CiRetriedHead = null);

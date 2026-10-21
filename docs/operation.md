@@ -32,11 +32,15 @@ Depkeeper repair are updated with a merge from the base. When that merge conflic
 asks Dependabot to recreate the update, which discards only its own repair commits; the recreated
 head keeps the repair attempts already spent. A passing repair blocked only by such a conflict is
 reopened this way. Branches carrying any other commit are reported for manual resolution.
+GitHub's GraphQL API can leave mergeability unknown until the REST pull request resource is read,
+so Depkeeper reads that resource for the exact head instead of mistaking an uncomputed value for a blocker.
 
 Before spending a repair, Depkeeper compares the exact head with the live base tip, because branch
 rules that do not require up-to-date branches never report a stale head as behind. A stale branch
 without human commits is brought up to date first, so the repair targets current code and does not
-later conflict with it.
+later conflict with it. Failed workflow jobs are then rerun once for that head. A failure that passes
+on rerun was transient and costs no repair, and a blocked head whose failure was never rerun receives
+that rerun before its verdict stands.
 
 Before merging, it refreshes the PR, checks the exact revision, reevaluates publication
 age, and lets GitHub enforce branch rules. Missing, pending, failed, or unexpectedly

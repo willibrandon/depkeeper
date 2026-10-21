@@ -134,6 +134,7 @@ internal sealed class MaintenanceRunner
                     var attempts = settings.RetryBlocked ? 0 : previous?.Attempts ?? (rebased ? earlier!.Attempts : 0);
                     var repairFeedback = resumeValidation ? validationFeedback :
                         previous?.RepairFailure ?? (rebasedBlocked ? earlier!.RepairFailure : null);
+                    var retriedHead = previous?.CiRetriedHead;
                     try
                     {
                         NpmCompatibilityAssessment? compatibility = null;
@@ -169,13 +170,34 @@ internal sealed class MaintenanceRunner
                             }
                             else
                             {
-                                var history = previous.RepairFailure ?? previous.Reason;
-                                var conflict = compatibility is { CompatibleVersion: null } ? compatibility.Conflict :
-                                    previous.UpstreamConflict;
-                                results.Add(RecordBlocker(current, profile, previous with { RepairFailure = history }, conflict,
-                                    reviewThreads.Count, settings.DryRun, compatibility is { CompatibleVersion: null },
-                                    CanWaitUpstream(previous)));
-                                continue;
+                                // A verdict reached without rerunning the failure may rest on a transient CI fault.
+                                if (!settings.DryRun && compatibility is not { CompatibleVersion: null } &&
+                                    NeedsRetry(current, profile, previous.CiRetriedHead, reviewThreads.Count))
+                                {
+                                    retriedHead = current.Head;
+                                    previous = previous with { CiRetriedHead = retriedHead };
+                                    _state.Set(current.Key, previous);
+                                    var (retried, requested, finished) = await _freshCi.RetryFailuresAsync(current, profile,
+                                        settings.CiTimeout, cancellationToken);
+                                    if (retried.Head != current.Head || requested && !finished)
+                                    {
+                                        results.Add(new ReportEntry(repository, current.Number, "pending",
+                                            "Waiting for the rerun of failed checks."));
+                                        continue;
+                                    }
+                                    current = retried;
+                                    if (!MergePolicy.HasFailure(current, profile)) previous = previous with { Blocked = false };
+                                }
+                                if (previous.Blocked)
+                                {
+                                    var history = previous.RepairFailure ?? previous.Reason;
+                                    var conflict = compatibility is { CompatibleVersion: null } ? compatibility.Conflict :
+                                        previous.UpstreamConflict;
+                                    results.Add(RecordBlocker(current, profile, previous with { RepairFailure = history }, conflict,
+                                        reviewThreads.Count, settings.DryRun, compatibility is { CompatibleVersion: null },
+                                        CanWaitUpstream(previous)));
+                                    continue;
+                                }
                             }
                         }
                         var ownership = NeedsRebase(current)
@@ -279,6 +301,27 @@ internal sealed class MaintenanceRunner
                                 }
                             }
                         }
+                        if (NeedsRetry(current, profile, retriedHead, reviewThreads.Count))
+                        {
+                            // A failed job is rerun once before a repair, so a transient fault does not spend a repair.
+                            retriedHead = current.Head;
+                            _state.Set(current.Key, (previous?.Head == current.Head ? previous :
+                                new AttemptState(current.Head, attempts, false, "", _clock.GetUtcNow(), RepairFailure: repairFeedback)) with
+                            {
+                                Reason = "Waiting for the rerun of failed checks.",
+                                UpdatedAt = _clock.GetUtcNow(),
+                                CiRetriedHead = retriedHead
+                            });
+                            var (retried, requested, finished) = await _freshCi.RetryFailuresAsync(current, profile,
+                                settings.CiTimeout, cancellationToken);
+                            if (retried.Head != current.Head || requested && !finished)
+                            {
+                                results.Add(new ReportEntry(repository, current.Number, "pending",
+                                    "Waiting for the rerun of failed checks."));
+                                continue;
+                            }
+                            current = retried;
+                        }
 
                         while ((MergePolicy.HasFailure(current, profile) || reviewThreads.Count > 0) && repairsAllowed &&
                             attempts < settings.MaxAttempts && repairs < settings.MaxRepairs)
@@ -289,7 +332,7 @@ internal sealed class MaintenanceRunner
                             _state.SetNextRepository((repositoryIndex + 1) % settings.Repositories.Length);
                             _state.Set(current.Key,
                                 new AttemptState(current.Head, attempts, false, "Repair in progress.", _clock.GetUtcNow(),
-                                    RepairFailure: repairFeedback));
+                                    RepairFailure: repairFeedback, CiRetriedHead: retriedHead));
                             var currentFailures = await _github.GetFailureLogsAsync(current, cancellationToken);
                             var context = _reviews.Format(reviewThreads);
                             if (settings.RetryBlocked && previous?.Blocked == true)
@@ -310,7 +353,7 @@ internal sealed class MaintenanceRunner
                                 repairFeedback = _redactor.Clean(exception.Message);
                                 if (repairFeedback.Length > 1200) repairFeedback = repairFeedback[..1200];
                                 _state.Set(current.Key, new AttemptState(current.Head, attempts, false, repairFeedback,
-                                    _clock.GetUtcNow(), RepairFailure: repairFeedback));
+                                    _clock.GetUtcNow(), RepairFailure: repairFeedback, CiRetriedHead: retriedHead));
                                 continue;
                             }
                             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -422,7 +465,8 @@ internal sealed class MaintenanceRunner
                         if (!settings.DryRun)
                         {
                             _state.Set(current.Key, new AttemptState(current.Head, attempts, true, detail, _clock.GetUtcNow(),
-                                BaseHead: await BaseTipAsync(repository, current, cancellationToken), RepairFailure: history));
+                                BaseHead: await BaseTipAsync(repository, current, cancellationToken), RepairFailure: history,
+                                CiRetriedHead: retriedHead));
                             try { await _github.CommentAsync(current, "Depkeeper stopped this repair: " + detail, cancellationToken); }
                             catch (Exception commentError) when (commentError is IOException or InvalidOperationException)
                             {
@@ -448,6 +492,10 @@ internal sealed class MaintenanceRunner
     }
 
     private static bool NeedsRebase(PullRequestSnapshot pullRequest) => pullRequest.MergeState is "BEHIND" or "DIRTY";
+
+    private static bool NeedsRetry(PullRequestSnapshot pullRequest, RepositoryProfile profile, string? retriedHead, int reviews) =>
+        reviews == 0 && retriedHead != pullRequest.Head && MergePolicy.ChecksFinished(pullRequest) &&
+        MergePolicy.HasFailure(pullRequest, profile);
 
     private async Task<IReadOnlyList<ReportEntry>> RetireClosedAsync(string repository, IReadOnlyList<PullRequestSnapshot> candidates,
         RunSettings settings, CancellationToken cancellationToken)

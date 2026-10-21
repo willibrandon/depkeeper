@@ -165,6 +165,11 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     /// </summary>
     internal bool RecoveryRerunSucceeds { get; set; }
 
+    /// <summary>
+    /// Gets or sets the result reported by rerun failed Dependabot PR checks, or null when GitHub refuses the rerun.
+    /// </summary>
+    internal string? PullRequestRerunState { get; set; }
+
     Task<IReadOnlyList<PullRequestSnapshot>> IGitHubGateway.ListAsync(string repository, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<PullRequestSnapshot>>(PullRequests.Where(pr =>
             pr.Repository == repository && pr.State == "OPEN" && !pr.ManagedRecovery)
@@ -232,6 +237,16 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
         if (failedOnly)
         {
             var recovery = PullRequests.Any(pullRequest => pullRequest.ManagedRecovery && pullRequest.Head == commit);
+            var rerun = PullRequests.FindIndex(pullRequest => !pullRequest.ManagedRecovery && pullRequest.Head == commit);
+            if (!recovery && rerun >= 0 && PullRequestRerunState is string state)
+            {
+                PullRequests[rerun] = PullRequests[rerun] with
+                {
+                    Checks = PullRequests[rerun].Checks.Select(check => check.Failed
+                        ? check with { State = state, CompletedAt = DateTimeOffset.UtcNow } : check).ToArray()
+                };
+                return Task.FromResult(true);
+            }
             if (!recovery && FailedRerunSucceeds) OnCommitChecks = _ => TestData.PullRequest().Checks;
             if (recovery && RecoveryRerunSucceeds)
             {
