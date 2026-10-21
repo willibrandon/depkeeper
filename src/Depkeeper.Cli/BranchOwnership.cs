@@ -16,6 +16,11 @@ internal enum BranchOwnership
     DependabotWithMerges,
 
     /// <summary>
+    /// Dependabot's commits are joined by controller repairs of this PR, which a merge from the base keeps and a recreation discards.
+    /// </summary>
+    DependabotWithRepairs,
+
+    /// <summary>
     /// The branch carries a controller or human commit that a Dependabot rewrite would discard.
     /// </summary>
     Foreign

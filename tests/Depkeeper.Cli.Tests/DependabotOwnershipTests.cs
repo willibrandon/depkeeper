@@ -7,8 +7,16 @@ namespace Depkeeper.Cli.Tests;
 [TestClass]
 public sealed class DependabotOwnershipTests(TestContext testContext)
 {
+    private const string Dependabot = "[{\"author\":{\"login\":\"dependabot[bot]\"},\"parents\":[{}]}";
+    private const string Repair = "{\"author\":{\"login\":\"github-actions[bot]\"},\"commit\":{\"author\":{\"name\":\"Depkeeper\"}," +
+        "\"message\":\"fix(deps): repair CI for #1\\n\\nVerified.\"},\"parents\":[{}]}";
+    private const string OtherRepair = "{\"author\":{\"login\":\"github-actions[bot]\"},\"commit\":{\"author\":" +
+        "{\"name\":\"Depkeeper\"},\"message\":\"fix(deps): repair CI for #2\"},\"parents\":[{}]}";
+    private const string WorkflowCommit = "{\"author\":{\"login\":\"github-actions[bot]\"},\"commit\":{\"author\":" +
+        "{\"name\":\"github-actions[bot]\"},\"message\":\"fix(deps): repair CI for #1\"},\"parents\":[{}]}";
+
     /// <summary>
-    /// Separates pristine Dependabot branches, branches with merges from the base, and branches carrying foreign commits.
+    /// Separates pristine Dependabot branches, merges from the base, this PR's controller repairs, and foreign commits.
     /// </summary>
     /// <param name="commits">The commits GitHub reports for the branch.</param>
     /// <param name="expected">The expected ownership name.</param>
@@ -20,6 +28,10 @@ public sealed class DependabotOwnershipTests(TestContext testContext)
         "DependabotWithMerges")]
     [DataRow("""[{"author":{"login":"dependabot[bot]"},"parents":[{}]},{"author":{"login":"github-actions[bot]"},"parents":[{}]}]""",
         "Foreign")]
+    [DataRow(Dependabot + "," + Repair + "]", "DependabotWithRepairs")]
+    [DataRow(Dependabot + "," + Repair + """,{"author":{"login":"willibrandon"},"parents":[{},{}]}]""", "DependabotWithRepairs")]
+    [DataRow(Dependabot + "," + OtherRepair + "]", "Foreign")]
+    [DataRow(Dependabot + "," + WorkflowCommit + "]", "Foreign")]
     [DataRow("""[{"author":null,"parents":[{}]}]""", "Foreign")]
     [DataRow("[]", "Foreign")]
     public async Task ClassifiesBranchOwnership(string commits, string expected)

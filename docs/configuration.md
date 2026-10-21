@@ -68,6 +68,11 @@ an outer checksum, Git revisions, private or self-hosted Hex repositories, and a
 cannot be read completely hold the update. Unsupported or unavailable metadata holds the
 update and is reported; Swift and private registries may require manual review.
 
+Dependency review requires the repository's dependency graph. When GitHub refuses it,
+changed npm locks, workflow `uses:` references, Dockerfiles, `pom.xml` files, and `mix.lock`
+files are still compared at the exact base and head. Any other update is reported as a
+blocker that asks for the dependency graph to be enabled, rather than waiting as a cooldown.
+
 Verified security fixes can bypass the delay when GitHub reports a vulnerable package
 being replaced and no introduced version has known advisories. Labels and PR titles
 do not grant this exception. Use `--wait-for-security-fixes` to require the delay too.

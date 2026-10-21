@@ -29,6 +29,21 @@ public sealed class ReleaseAgeGateTests(TestContext testContext)
     }
 
     /// <summary>
+    /// Surfaces unavailable dependency review unless the policy explicitly allows unverifiable metadata.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task UnavailableDependencyReviewIsSurfacedUnlessUnknownIsAllowed()
+    {
+        var gate = new ReleaseAgeGate((_, _) => throw new DependencyReviewUnavailableException(),
+            (_, _) => Task.FromResult<DateTimeOffset?>(null));
+        await Assert.ThrowsAsync<DependencyReviewUnavailableException>(() =>
+            gate.GetBlockerAsync(TestData.PullRequest(), new ReleaseAgePolicy(), testContext.CancellationToken));
+        Assert.IsNull(await gate.GetBlockerAsync(TestData.PullRequest(), new ReleaseAgePolicy(AllowUnknown: true),
+            testContext.CancellationToken));
+    }
+
+    /// <summary>
     /// Contains metadata service failures while propagating cancellation from the caller.
     /// </summary>
     /// <returns>The test task.</returns>

@@ -119,8 +119,9 @@ internal sealed class MaintenanceRunner
                     _state.State.PullRequests.TryGetValue(current.Key, out var earlier);
                     // GitHub recomputes mergeability lazily after the base moves; a blocked verdict is not reaffirmed on a stale value.
                     if (earlier is { Blocked: true }) current = await WaitForMergeabilityAsync(current, cancellationToken);
-                    // A head that Dependabot produced at the controller's request inherits the blocked verdict's repair budget.
-                    var rebasedBlocked = earlier is { RebaseRequested: true, Blocked: true } && earlier.Head != current.Head;
+                    // A head that Dependabot produced at the controller's request inherits the earlier repair budget and verdict.
+                    var rebased = earlier is { RebaseRequested: true } && earlier.Head != current.Head;
+                    var rebasedBlocked = rebased && earlier!.Blocked;
                     var previous = earlier?.Head == current.Head ? earlier : null;
                     // The PR's recorded base is only refreshed when its head moves, so the live branch tip tells whether the base moved.
                     var baseTip = previous?.Blocked == true || NeedsRebase(current)
@@ -130,13 +131,22 @@ internal sealed class MaintenanceRunner
                     var resumeValidation = validationFeedback is not null && earlier!.Attempts < settings.MaxAttempts &&
                         (previous is not null || rebasedBlocked);
                     var repairsAllowed = settings.RetryBlocked || resumeValidation || !rebasedBlocked && !baseMoved;
-                    var attempts = settings.RetryBlocked ? 0 : previous?.Attempts ?? (rebasedBlocked ? earlier!.Attempts : 0);
+                    var attempts = settings.RetryBlocked ? 0 : previous?.Attempts ?? (rebased ? earlier!.Attempts : 0);
                     var repairFeedback = resumeValidation ? validationFeedback :
                         previous?.RepairFailure ?? (rebasedBlocked ? earlier!.RepairFailure : null);
                     try
                     {
                         NpmCompatibilityAssessment? compatibility = null;
                         string? inspectedHead = null;
+                        BranchOwnership? conflictOwnership = null;
+                        if (previous?.Blocked == true && current.MergeState == "DIRTY" && reviewThreads.Count == 0 &&
+                            MergePolicy.ChecksFinished(current) && !MergePolicy.HasFailure(current, profile))
+                        {
+                            // A repair that passed CI but no longer merges cleanly is not a repair verdict; recreating the
+                            // update discards it so the current base can be verified within the remaining repair budget.
+                            conflictOwnership = await _github.GetBranchOwnershipAsync(current, cancellationToken);
+                            if (conflictOwnership == BranchOwnership.DependabotWithRepairs) previous = previous with { Blocked = false };
+                        }
                         if (previous?.Blocked == true && !settings.RetryBlocked && !baseMoved &&
                             (MergePolicy.GetBlocker(current, current.Head, profile) is not null || reviewThreads.Count > 0))
                         {
@@ -169,9 +179,10 @@ internal sealed class MaintenanceRunner
                             }
                         }
                         var ownership = NeedsRebase(current)
-                            ? await _github.GetBranchOwnershipAsync(current, cancellationToken) : BranchOwnership.Foreign;
-                        var owned = ownership != BranchOwnership.Foreign;
-                        if (owned || current.MergeState == "BEHIND")
+                            ? conflictOwnership ?? await _github.GetBranchOwnershipAsync(current, cancellationToken)
+                            : BranchOwnership.Foreign;
+                        var owned = ownership is BranchOwnership.Dependabot or BranchOwnership.DependabotWithMerges;
+                        if (ownership != BranchOwnership.Foreign || current.MergeState == "BEHIND")
                         {
                             if (settings.DryRun)
                             {
@@ -180,8 +191,8 @@ internal sealed class MaintenanceRunner
                                     (owned ? "Ask Dependabot to rebase and rerun CI." : "Bring the branch up to date and rerun CI.")));
                                 continue;
                             }
-                            var updated = await BringUpToDateAsync(current, ownership, previous, baseTip!, settings.CiTimeout,
-                                cancellationToken);
+                            var updated = await BringUpToDateAsync(current, ownership, previous, baseTip!, attempts,
+                                previous?.Blocked ?? false, settings.CiTimeout, cancellationToken);
                             mutated = true;
                             if (updated is null)
                             {
@@ -192,10 +203,10 @@ internal sealed class MaintenanceRunner
                             current = updated;
                             reviewThreads = await _reviews.GetAsync(current, cancellationToken);
                         }
-                        var ageBlocker = await _releaseAge.GetBlockerAsync(current, agePolicy, cancellationToken);
+                        var ageBlocker = await CheckReleaseAgeAsync(current, agePolicy, cancellationToken);
                         if (ageBlocker is not null)
                         {
-                            results.Add(new ReportEntry(repository, current.Number, "cooldown", ageBlocker));
+                            results.Add(ageBlocker);
                             continue;
                         }
                         if (inspectedHead != current.Head)
@@ -238,6 +249,35 @@ internal sealed class MaintenanceRunner
                         {
                             results.Add(new ReportEntry(repository, current.Number, "pending", "CI is still running for this revision."));
                             continue;
+                        }
+                        if (MergePolicy.HasFailure(current, profile) && repairsAllowed && attempts < settings.MaxAttempts &&
+                            repairs < settings.MaxRepairs)
+                        {
+                            // Branch rules need not require up-to-date branches, so GitHub may not report a stale head as behind.
+                            // A repair is made against the current base, which may already resolve the failure or conflict with it.
+                            var liveBase = await _github.GetBranchHeadAsync(repository, current.BaseBranch, cancellationToken);
+                            var staleOwnership = await _github.IsBehindAsync(current, liveBase, cancellationToken)
+                                ? await _github.GetBranchOwnershipAsync(current, cancellationToken) : BranchOwnership.Foreign;
+                            if (staleOwnership != BranchOwnership.Foreign)
+                            {
+                                var updated = await BringUpToDateAsync(current, staleOwnership, previous, liveBase, attempts, false,
+                                    settings.CiTimeout, cancellationToken);
+                                mutated = true;
+                                if (updated is null)
+                                {
+                                    results.Add(new ReportEntry(repository, current.Number, "pending",
+                                        "Waiting for the branch to include its current base before repairing."));
+                                    continue;
+                                }
+                                current = updated;
+                                reviewThreads = await _reviews.GetAsync(current, cancellationToken);
+                                if (!MergePolicy.ChecksFinished(current))
+                                {
+                                    results.Add(new ReportEntry(repository, current.Number, "pending",
+                                        "CI is still running for this revision."));
+                                    continue;
+                                }
+                            }
                         }
 
                         while ((MergePolicy.HasFailure(current, profile) || reviewThreads.Count > 0) && repairsAllowed &&
@@ -312,14 +352,17 @@ internal sealed class MaintenanceRunner
                         {
                             var finalOwnership = await _github.GetBranchOwnershipAsync(current, cancellationToken);
                             var liveBase = await _github.GetBranchHeadAsync(repository, current.BaseBranch, cancellationToken);
-                            var updated = await BringUpToDateAsync(current, finalOwnership, previous, liveBase, settings.CiTimeout,
-                                cancellationToken);
+                            // A repair pushed during this run has its own checkpoint; the earlier revision's state no longer applies.
+                            var verified = _state.State.PullRequests.GetValueOrDefault(current.Key) is { } saved &&
+                                saved.Head == current.Head ? saved : null;
+                            var updated = await BringUpToDateAsync(current, finalOwnership, verified, liveBase, attempts,
+                                verified?.Blocked ?? false, settings.CiTimeout, cancellationToken);
                             mutated = true;
                             if (updated is null)
                             {
                                 results.Add(new ReportEntry(repository, current.Number, "pending",
-                                    finalOwnership == BranchOwnership.Foreign ? "Waiting for the updated branch." :
-                                        "Waiting for Dependabot to rebase the branch."));
+                                    finalOwnership is BranchOwnership.Foreign or BranchOwnership.DependabotWithRepairs
+                                        ? "Waiting for the updated branch." : "Waiting for Dependabot to rebase the branch."));
                                 continue;
                             }
                             current = updated;
@@ -338,10 +381,10 @@ internal sealed class MaintenanceRunner
                                 "Unresolved review feedback remains on the exact PR revision."));
                             continue;
                         }
-                        var finalAgeBlocker = await _releaseAge.GetBlockerAsync(current, agePolicy, cancellationToken);
+                        var finalAgeBlocker = await CheckReleaseAgeAsync(current, agePolicy, cancellationToken);
                         if (finalAgeBlocker is not null)
                         {
-                            results.Add(new ReportEntry(repository, current.Number, "cooldown", finalAgeBlocker));
+                            results.Add(finalAgeBlocker);
                             continue;
                         }
                         var reason = MergePolicy.GetBlocker(current, verifiedHead, profile);
@@ -435,6 +478,21 @@ internal sealed class MaintenanceRunner
         return results;
     }
 
+    private async Task<ReportEntry?> CheckReleaseAgeAsync(PullRequestSnapshot current, ReleaseAgePolicy policy,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var blocker = await _releaseAge.GetBlockerAsync(current, policy, cancellationToken);
+            return blocker is null ? null : new ReportEntry(current.Repository, current.Number, "cooldown", blocker);
+        }
+        catch (DependencyReviewUnavailableException exception)
+        {
+            // Waiting never restores dependency review, so this is reported for attention rather than as a cooldown.
+            return new ReportEntry(current.Repository, current.Number, "blocked", exception.Message);
+        }
+    }
+
     private async Task<string?> BaseTipAsync(string repository, PullRequestSnapshot current, CancellationToken cancellationToken)
     {
         try { return await _github.GetBranchHeadAsync(repository, current.BaseBranch, cancellationToken); }
@@ -491,28 +549,31 @@ internal sealed class MaintenanceRunner
     }
 
     private async Task<PullRequestSnapshot?> BringUpToDateAsync(PullRequestSnapshot current, BranchOwnership ownership,
-        AttemptState? previous, string baseTip, TimeSpan timeout, CancellationToken cancellationToken)
+        AttemptState? previous, string baseTip, int attempts, bool blocked, TimeSpan timeout, CancellationToken cancellationToken)
     {
-        if (ownership == BranchOwnership.Foreign)
+        var requested = previous is { RebaseRequested: true } && previous.BaseHead == baseTip;
+        // A merge from the base keeps a verified repair, so it is tried before the repair is discarded.
+        var merge = ownership == BranchOwnership.Foreign || ownership == BranchOwnership.DependabotWithRepairs && !requested;
+        if (!merge || !await _github.UpdateBranchAsync(current, cancellationToken))
         {
-            if (!await _github.UpdateBranchAsync(current, cancellationToken))
+            if (ownership == BranchOwnership.Foreign)
                 throw new InvalidOperationException("GitHub could not update the branch; resolve conflicts or permissions.");
-        }
-        else if (previous is { RebaseRequested: true } && previous.BaseHead == baseTip)
-        {
-            if (previous.UpdatedAt + TimeSpan.FromDays(1) < _clock.GetUtcNow())
-                throw new InvalidOperationException(
-                    $"Dependabot has not rebased this branch since {previous.UpdatedAt:u}; rebase or close the PR manually.");
-        }
-        else
-        {
-            // Dependabot stops rebasing a branch once another account pushes to it, so the controller asks instead of merging.
-            // It refuses to rebase over a merge from the base and must recreate the update instead.
-            await _github.CommentAsync(current,
-                ownership == BranchOwnership.Dependabot ? "@dependabot rebase" : "@dependabot recreate", cancellationToken);
-            _state.Set(current.Key, new AttemptState(current.Head, previous?.Attempts ?? 0, previous?.Blocked ?? false,
-                previous?.Reason ?? "Waiting for Dependabot to rebase.", _clock.GetUtcNow(), BaseHead: baseTip,
-                RebaseRequested: true, RepairFailure: previous?.RepairFailure, UpstreamConflict: previous?.UpstreamConflict));
+            if (requested)
+            {
+                if (previous!.UpdatedAt + TimeSpan.FromDays(1) < _clock.GetUtcNow())
+                    throw new InvalidOperationException(
+                        $"Dependabot has not rebased this branch since {previous.UpdatedAt:u}; rebase or close the PR manually.");
+            }
+            else
+            {
+                // Dependabot stops rebasing a branch once another account pushes to it, so the controller asks instead of merging.
+                // It refuses to rebase over a merge from the base or a conflicting controller repair and must recreate the update.
+                await _github.CommentAsync(current,
+                    ownership == BranchOwnership.Dependabot ? "@dependabot rebase" : "@dependabot recreate", cancellationToken);
+                _state.Set(current.Key, new AttemptState(current.Head, attempts, blocked,
+                    previous?.Reason ?? "Waiting for Dependabot to rebase.", _clock.GetUtcNow(), BaseHead: baseTip,
+                    RebaseRequested: true, RepairFailure: previous?.RepairFailure, UpstreamConflict: previous?.UpstreamConflict));
+            }
         }
         var latest = await WaitAsync(current, timeout, true, cancellationToken);
         return latest.Head == current.Head ? null : latest;

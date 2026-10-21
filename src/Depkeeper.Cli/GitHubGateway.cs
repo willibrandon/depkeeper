@@ -390,7 +390,8 @@ internal sealed partial class GitHubGateway : IGitHubGateway
     }
 
     /// <summary>
-    /// Reads the branch's commits and classifies them as Dependabot's own work, merges from the base, or foreign commits.
+    /// Reads the branch's commits and classifies them as Dependabot's own work, merges from the base, controller repairs,
+    /// or foreign commits.
     /// </summary>
     /// <param name="pullRequest">The pull request to inspect.</param>
     /// <param name="cancellationToken">Cancels retrieval.</param>
@@ -404,12 +405,37 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         var commits = document.RootElement.EnumerateArray().SelectMany(page => page.EnumerateArray()).ToArray();
         if (commits.Length == 0) return BranchOwnership.Foreign;
         var foreign = commits.Where(commit => !IsAuthoredBy(commit, "dependabot[bot]")).ToArray();
-        if (foreign.Any(commit => !IsMerge(commit))) return BranchOwnership.Foreign;
+        var repairs = foreign.Where(commit => !IsMerge(commit)).ToArray();
+        if (repairs.Any(commit => !IsRepairOf(commit, pullRequest.Number))) return BranchOwnership.Foreign;
+        if (repairs.Length > 0) return BranchOwnership.DependabotWithRepairs;
         return foreign.Length == 0 ? BranchOwnership.Dependabot : BranchOwnership.DependabotWithMerges;
+    }
+
+    /// <summary>
+    /// Determines whether a pull request head lacks commits that are on the live base tip.
+    /// </summary>
+    /// <param name="pullRequest">The exact pull request revision.</param>
+    /// <param name="baseTip">The live base branch tip.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>Whether the head is behind its base.</returns>
+    public async Task<bool> IsBehindAsync(PullRequestSnapshot pullRequest, string baseTip, CancellationToken cancellationToken)
+    {
+        var comparison = await ExecuteAsync(["api",
+            $"repos/{pullRequest.Repository}/compare/{Uri.EscapeDataString(baseTip)}...{Uri.EscapeDataString(pullRequest.Head)}",
+            "--jq", ".behind_by"], cancellationToken);
+        RequireSuccess(comparison);
+        return int.TryParse(comparison.Output.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var behind)
+            ? behind > 0 : throw new IOException("GitHub returned an invalid branch comparison.");
     }
 
     private static bool IsAuthoredBy(JsonElement commit, string login) =>
         commit.TryGetProperty("author", out var author) && author.ValueKind == JsonValueKind.Object && Text(author, "login") == login;
+
+    private static bool IsRepairOf(JsonElement commit, int number) =>
+        IsAuthoredBy(commit, CopilotRepairer.CommitAccount) && commit.TryGetProperty("commit", out var details) &&
+        details.ValueKind == JsonValueKind.Object && details.TryGetProperty("author", out var author) &&
+        author.ValueKind == JsonValueKind.Object && Text(author, "name") == CopilotRepairer.CommitAuthor &&
+        Text(details, "message").Split('\n')[0] == CopilotRepairer.CommitMessage(number);
 
     private static bool IsMerge(JsonElement commit) =>
         commit.TryGetProperty("parents", out var parents) && parents.ValueKind == JsonValueKind.Array && parents.GetArrayLength() > 1;
@@ -543,12 +569,37 @@ internal sealed partial class GitHubGateway : IGitHubGateway
         var files = await GetPullRequestFilesAsync(pullRequest, cancellationToken);
         var npmChanges = result.ExitCode != 0 || changes.Length == 0
             ? await GetNpmChangesAsync(pullRequest, files, cancellationToken) : [];
+        var workflowChanges = result.ExitCode != 0 ? await GetWorkflowChangesAsync(pullRequest, files, cancellationToken) : [];
         var dockerChanges = await GetDockerChangesAsync(pullRequest, files, cancellationToken);
         var mavenChanges = await GetMavenChangesAsync(pullRequest, files, cancellationToken);
         var mixChanges = await GetMixChangesAsync(pullRequest, files, cancellationToken);
-        var fallbacks = npmChanges.Concat(dockerChanges).Concat(mavenChanges).Concat(mixChanges).Distinct().ToArray();
-        if (result.ExitCode != 0 && fallbacks.Length == 0) RequireSuccess(result);
+        var fallbacks = npmChanges.Concat(workflowChanges).Concat(dockerChanges).Concat(mavenChanges).Concat(mixChanges)
+            .Distinct().ToArray();
+        if (result.ExitCode != 0 && fallbacks.Length == 0)
+        {
+            // GitHub refuses dependency review while the dependency graph is disabled; other failures may be transient.
+            if (result.Error.Contains("(HTTP 403)", StringComparison.Ordinal) ||
+                result.Error.Contains("(HTTP 404)", StringComparison.Ordinal)) throw new DependencyReviewUnavailableException();
+            RequireSuccess(result);
+        }
         return changes.Concat(fallbacks).Distinct().ToArray();
+    }
+
+    private async Task<IReadOnlyList<DependencyChange>> GetWorkflowChangesAsync(PullRequestSnapshot pullRequest,
+        JsonElement[] files, CancellationToken cancellationToken)
+    {
+        var changes = new List<DependencyChange>();
+        foreach (var file in files.Where(file => WorkflowDependencyParser.IsWorkflow(Text(file, "filename"))))
+        {
+            var path = Text(file, "filename");
+            var before = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.BaseHead ?? pullRequest.BaseBranch,
+                path, cancellationToken);
+            var after = await ReadRepositoryFileAsync(pullRequest.Repository, pullRequest.Head, path, cancellationToken);
+            if (after is null && Text(file, "status") != "removed")
+                throw new IOException("A changed workflow file could not be read at the exact PR head.");
+            changes.AddRange(WorkflowDependencyParser.Compare(before, after));
+        }
+        return changes;
     }
 
     /// <summary>

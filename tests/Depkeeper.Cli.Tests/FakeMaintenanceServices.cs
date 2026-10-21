@@ -56,6 +56,21 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
     internal BranchOwnership Ownership { get; set; } = BranchOwnership.Dependabot;
 
     /// <summary>
+    /// Gets or sets whether the fake head lacks commits from the live base tip.
+    /// </summary>
+    internal bool Behind { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether GitHub accepts a merge-from-base branch update.
+    /// </summary>
+    internal bool AcceptUpdateBranch { get; set; }
+
+    /// <summary>
+    /// Gets the number of requested merge-from-base branch updates.
+    /// </summary>
+    internal int BranchUpdates { get; private set; }
+
+    /// <summary>
     /// Gets the number of refresh requests.
     /// </summary>
     internal int Refreshes { get; private set; }
@@ -180,8 +195,11 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
         return Task.CompletedTask;
     }
 
-    Task<bool> IGitHubGateway.UpdateBranchAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken) =>
-        Task.FromResult(false);
+    Task<bool> IGitHubGateway.UpdateBranchAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken)
+    {
+        BranchUpdates++;
+        return Task.FromResult(AcceptUpdateBranch);
+    }
 
     Task<string?> IGitHubGateway.MergeAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken)
     {
@@ -261,6 +279,9 @@ internal sealed class FakeMaintenanceServices : IGitHubGateway, IRepairer
 
     Task<BranchOwnership> IGitHubGateway.GetBranchOwnershipAsync(PullRequestSnapshot pullRequest,
         CancellationToken cancellationToken) => Task.FromResult(Ownership);
+
+    Task<bool> IGitHubGateway.IsBehindAsync(PullRequestSnapshot pullRequest, string baseTip, CancellationToken cancellationToken) =>
+        Task.FromResult(Behind);
 
     Task IGitHubGateway.CommentAsync(PullRequestSnapshot pullRequest, string body, CancellationToken cancellationToken)
     {

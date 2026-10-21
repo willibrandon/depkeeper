@@ -221,8 +221,17 @@ internal sealed class RecoveryRunner
             var blocker = MergePolicy.GetBlocker(pullRequest, expectedHead, profile);
             if (blocker is not null) return (Report(MergePolicy.IsPending(pullRequest) ? "pending" : "blocked",
                 $"Recovery PR #{pullRequest.Number}: {blocker}"), used, mutated);
-            var age = await _releaseAge.GetBlockerAsync(pullRequest, profile.ReleaseAge ?? settings.ReleaseAge ?? new ReleaseAgePolicy(),
-                cancellationToken);
+            string? age;
+            try
+            {
+                age = await _releaseAge.GetBlockerAsync(pullRequest, profile.ReleaseAge ?? settings.ReleaseAge ?? new ReleaseAgePolicy(),
+                    cancellationToken);
+            }
+            catch (DependencyReviewUnavailableException exception)
+            {
+                // A repository setting, not the recovery, prevents verification, so the recovery is not marked blocked.
+                return (Report("blocked", $"Recovery PR #{pullRequest.Number}: {exception.Message}"), used, mutated);
+            }
             if (age is not null) return (Report("cooldown", $"Recovery PR #{pullRequest.Number}: {age}"), used, mutated);
             var mergeHead = await _github.MergeAsync(pullRequest, cancellationToken) ??
                 throw new InvalidOperationException("GitHub did not confirm the recovery PR merge.");

@@ -28,7 +28,15 @@ A Dependabot branch that is behind or conflicts with its base is brought up to d
 asking Dependabot to rebase it, or to recreate it when the branch carries merges from the
 base. Depkeeper does not push merge commits onto Dependabot branches, because Dependabot
 stops rebasing a branch once another account pushes to it. Branches that already carry a
-Depkeeper repair are updated with a merge from the base.
+Depkeeper repair are updated with a merge from the base. When that merge conflicts, Depkeeper
+asks Dependabot to recreate the update, which discards only its own repair commits; the recreated
+head keeps the repair attempts already spent. A passing repair blocked only by such a conflict is
+reopened this way. Branches carrying any other commit are reported for manual resolution.
+
+Before spending a repair, Depkeeper compares the exact head with the live base tip, because branch
+rules that do not require up-to-date branches never report a stale head as behind. A stale branch
+without human commits is brought up to date first, so the repair targets current code and does not
+later conflict with it.
 
 Before merging, it refreshes the PR, checks the exact revision, reevaluates publication
 age, and lets GitHub enforce branch rules. Missing, pending, failed, or unexpectedly
