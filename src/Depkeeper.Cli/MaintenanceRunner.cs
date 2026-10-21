@@ -520,7 +520,8 @@ internal sealed class MaintenanceRunner
                 RepairFailure = saved.RepairFailure ?? "",
                 UpstreamConflict = resumeUpstream ? conflict : null
             });
-        return new ReportEntry(current.Repository, current.Number, "blocked", detail);
+        // A registry-verified upstream wait resumes automatically and offers the developer nothing to do.
+        return new ReportEntry(current.Repository, current.Number, conflict is null ? "blocked" : "upstream", detail);
     }
 
     private static bool CanWaitUpstream(AttemptState saved)
