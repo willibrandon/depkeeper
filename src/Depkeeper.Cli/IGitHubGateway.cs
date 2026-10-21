@@ -129,6 +129,15 @@ internal interface IGitHubGateway
     Task<BranchOwnership> GetBranchOwnershipAsync(PullRequestSnapshot pullRequest, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Determines whether the exact head lacks commits from the live base tip, independently of branch rules.
+    /// </summary>
+    /// <param name="pullRequest">The exact pull request revision.</param>
+    /// <param name="baseTip">The live base branch tip.</param>
+    /// <param name="cancellationToken">Cancels retrieval.</param>
+    /// <returns>Whether the head is behind its base.</returns>
+    Task<bool> IsBehindAsync(PullRequestSnapshot pullRequest, string baseTip, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Publishes an actionable outcome on a pull request.
     /// </summary>
     /// <param name="pullRequest">The target pull request.</param>

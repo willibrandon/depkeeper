@@ -9,6 +9,16 @@ namespace Depkeeper.Cli;
 /// </summary>
 internal sealed class CopilotRepairer : IRepairer
 {
+    /// <summary>
+    /// The commit author name that identifies controller repairs on pull request branches.
+    /// </summary>
+    internal const string CommitAuthor = "Depkeeper";
+
+    /// <summary>
+    /// The account GitHub associates with the controller's repair commit email address.
+    /// </summary>
+    internal const string CommitAccount = "github-actions[bot]";
+
     private const string NpmAuditRepairCommand = "npm audit fix --package-lock-only";
 
     private readonly string _model;
@@ -33,6 +43,13 @@ internal sealed class CopilotRepairer : IRepairer
         _redactor = redactor;
         _github = github;
     }
+
+    /// <summary>
+    /// Formats the commit message that identifies a controller repair of one pull request.
+    /// </summary>
+    /// <param name="number">The repaired pull request number.</param>
+    /// <returns>The repair commit's subject line.</returns>
+    internal static string CommitMessage(int number) => $"fix(deps): repair CI for #{number}";
 
     /// <summary>
     /// Produces a verified repair on a disposable checkout and pushes only a fast-forward commit.
@@ -175,8 +192,8 @@ internal sealed class CopilotRepairer : IRepairer
                     throw new InvalidOperationException("The PR changed while Copilot worked; no repair was pushed.");
             }
             Require(await GitAsync(directory,
-                ["-c", "user.name=Depkeeper", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
-                "commit", "-m", $"fix(deps): repair CI for #{pullRequest.Number}"], cancellationToken),
+                ["-c", "user.name=" + CommitAuthor, "-c", "user.email=41898282+" + CommitAccount + "@users.noreply.github.com",
+                "commit", "-m", CommitMessage(pullRequest.Number)], cancellationToken),
                 "Git could not commit the verified repair.");
             var head = await GitAsync(directory, ["rev-parse", "HEAD"], cancellationToken);
             Require(head, "Git could not read the repair commit.");

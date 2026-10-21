@@ -34,6 +34,8 @@ internal sealed class ReleaseAgeGate : IReleaseAgeGate
     /// <param name="policy">The applicable cooldown policy.</param>
     /// <param name="cancellationToken">Cancels metadata retrieval.</param>
     /// <returns>A hold reason or null.</returns>
+    /// <exception cref="DependencyReviewUnavailableException">Dependency review is unavailable and the policy requires metadata.
+    /// </exception>
     public async Task<string?> GetBlockerAsync(PullRequestSnapshot pullRequest, ReleaseAgePolicy policy,
         CancellationToken cancellationToken)
     {
@@ -69,6 +71,10 @@ internal sealed class ReleaseAgeGate : IReleaseAgeGate
                     return $"Cooling down: {dependency.Name}@{dependency.Version} becomes eligible {eligible:u}.";
             }
             return null;
+        }
+        catch (DependencyReviewUnavailableException) when (!policy.AllowUnknown)
+        {
+            throw;
         }
         catch (Exception exception) when (exception is IOException or HttpRequestException or System.Text.Json.JsonException or
             System.Xml.XmlException)

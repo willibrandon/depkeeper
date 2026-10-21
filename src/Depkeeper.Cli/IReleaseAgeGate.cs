@@ -12,5 +12,7 @@ internal interface IReleaseAgeGate
     /// <param name="policy">The deployment's release-age policy.</param>
     /// <param name="cancellationToken">Cancels metadata retrieval.</param>
     /// <returns>A hold reason, or null when the policy is satisfied.</returns>
+    /// <exception cref="DependencyReviewUnavailableException">Dependency review is unavailable and the policy requires metadata.
+    /// </exception>
     Task<string?> GetBlockerAsync(PullRequestSnapshot pullRequest, ReleaseAgePolicy policy, CancellationToken cancellationToken);
 }
