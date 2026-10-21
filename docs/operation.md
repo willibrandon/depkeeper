@@ -31,7 +31,8 @@ stops rebasing a branch once another account pushes to it. Branches that already
 Depkeeper repair are updated with a merge from the base. When that merge conflicts, Depkeeper
 asks Dependabot to recreate the update, which discards only its own repair commits; the recreated
 head keeps the repair attempts already spent. A passing repair blocked only by such a conflict is
-reopened this way. Branches carrying any other commit are reported for manual resolution.
+reopened this way, as is one with no checks, because GitHub runs no pull request workflows while a
+PR conflicts. Branches carrying any other commit are reported for manual resolution.
 GitHub's GraphQL API can leave mergeability unknown until the REST pull request resource is read,
 so Depkeeper reads that resource for the exact head instead of mistaking an uncomputed value for a blocker.
 

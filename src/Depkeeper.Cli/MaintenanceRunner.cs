@@ -141,10 +141,12 @@ internal sealed class MaintenanceRunner
                         string? inspectedHead = null;
                         BranchOwnership? conflictOwnership = null;
                         if (previous?.Blocked == true && current.MergeState == "DIRTY" && reviewThreads.Count == 0 &&
-                            MergePolicy.ChecksFinished(current) && !MergePolicy.HasFailure(current, profile))
+                            (current.Checks.Count == 0 ||
+                                MergePolicy.ChecksFinished(current) && !MergePolicy.HasFailure(current, profile)))
                         {
                             // A repair that passed CI but no longer merges cleanly is not a repair verdict; recreating the
                             // update discards it so the current base can be verified within the remaining repair budget.
+                            // GitHub runs no pull request workflows while a PR conflicts, so such a repair may have no checks.
                             conflictOwnership = await _github.GetBranchOwnershipAsync(current, cancellationToken);
                             if (conflictOwnership == BranchOwnership.DependabotWithRepairs) previous = previous with { Blocked = false };
                         }

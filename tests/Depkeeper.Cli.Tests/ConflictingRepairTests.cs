@@ -103,6 +103,31 @@ public sealed class ConflictingRepairTests(TestContext testContext)
     }
 
     /// <summary>
+    /// Recreates a blocked repair that never received checks because GitHub skips pull request workflows during a conflict.
+    /// </summary>
+    /// <returns>The test task.</returns>
+    [TestMethod]
+    public async Task ConflictingRepairWithoutChecksIsRecreated()
+    {
+        var directory = Directory.CreateTempSubdirectory("depkeeper-test-").FullName;
+        try
+        {
+            var services = new FakeMaintenanceServices { Ownership = BranchOwnership.DependabotWithRepairs };
+            var pr = TestData.PullRequest() with { MergeState = "DIRTY", Mergeable = "CONFLICTING", Checks = [] };
+            services.PullRequests.Add(pr);
+            services.OnComment = (_, _) => services.PullRequests[0] = TestData.PullRequest() with { Head = new string('b', 40) };
+            var store = new StateStore(Path.Join(directory, "state.json"));
+            store.Set(pr.Key, new AttemptState(pr.Head, 1, true, "Blocked.", DateTimeOffset.UtcNow, BaseHead: services.BaseHead,
+                RepairFailure: "GitHub could not update the branch; resolve conflicts or permissions."));
+            var runner = new MaintenanceRunner(services, services, store, new Redactor(), TestData.AgeGate(), pollInterval: TimeSpan.Zero);
+            var results = await runner.RunAsync(TestData.Settings(), testContext.CancellationToken);
+            Assert.AreEqual("@dependabot recreate", services.CommentBodies.Single());
+            Assert.AreEqual("merged", results.Single().Outcome);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    /// <summary>
     /// Leaves a blocked conflicting revision alone when its repair still fails or the branch carries foreign work.
     /// </summary>
     /// <param name="ownership">The branch ownership name.</param>
